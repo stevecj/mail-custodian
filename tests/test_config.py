@@ -65,8 +65,9 @@ def test_load_config_merges_includes_and_multiple_files(
                     criteria:
                       seen: false
                     actions:
-                      add_flags:
-                        - \\Flagged
+                      copy_to:
+                        account: shared
+                        mailbox: Shared/Alerts
             """
         ).strip(),
         encoding="utf-8",
@@ -80,3 +81,34 @@ def test_load_config_merges_includes_and_multiple_files(
     assert config.accounts[0].password == "env-secret"
     assert config.accounts[2].create_missing_mailboxes is True
     assert config.accounts[2].rules[0].mailbox == "Alerts"
+    assert config.accounts[2].rules[0].actions.copy_to is not None
+    assert config.accounts[2].rules[0].actions.copy_to.account == "shared"
+    assert config.accounts[2].rules[0].actions.copy_to.mailbox == "Shared/Alerts"
+
+
+def test_load_config_rejects_unknown_cross_account_target(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            accounts:
+              - name: personal
+                host: imap.personal.test
+                username: personal-user
+                password: personal-secret
+                rules:
+                  - name: move elsewhere
+                    actions:
+                      move_to:
+                        account: archive
+                        mailbox: Archive/Inbox
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    try:
+        load_config([str(tmp_path / "config.yaml")])
+    except ValueError as exc:
+        assert "references unknown account 'archive'" in str(exc)
+    else:
+        raise AssertionError("expected unknown target account to raise an error")

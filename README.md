@@ -64,7 +64,7 @@ Use `config.example.yaml` as a starting point.
 | `password` | string | IMAP password. |
 | `password_env` | string | Environment variable name containing the password. |
 | `default_mailbox` | string | Mailbox used when a rule omits `mailbox`. |
-| `create_missing_mailboxes` | boolean | Create `move_to`/`copy_to` targets when missing. |
+| `create_missing_mailboxes` | boolean | Create `move_to`/`copy_to` target mailboxes for this account when missing. |
 | `timeout` | integer | Socket timeout in seconds. |
 | `rules` | list | Filtering rules. |
 
@@ -91,8 +91,8 @@ If a rule has no criteria, it matches every message in its mailbox.
 
 | Key | Meaning |
 | --- | --- |
-| `move_to` | Move matching messages to another mailbox. Before moving, Mail Custodian checks the destination for a likely duplicate using the same heuristic as `copy_to`; if one is found, it deletes the source message instead of creating another copy. Uses IMAP `MOVE` when supported, otherwise `COPY` + `\Deleted`. |
-| `copy_to` | Copy matching messages to another mailbox. Copies are best-effort idempotent: Mail Custodian searches for likely matches by stable headers, then compares the full message content before deciding whether to skip a duplicate copy. |
+| `move_to` | Move matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to move into a different configured account. Before moving, Mail Custodian checks the destination for a likely duplicate using the same heuristic as `copy_to`; if one is found, it deletes the source message instead of creating another copy. Same-account moves use IMAP `MOVE` when supported, otherwise `COPY` + `\Deleted`; cross-account moves append to the destination account and then delete the source. |
+| `copy_to` | Copy matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to copy into a different configured account. Copies are best-effort idempotent: Mail Custodian searches for likely matches by stable headers, then compares the full message content before deciding whether to skip a duplicate copy. |
 | `mark_read` / `mark_unread` | Add or remove the `\Seen` flag. |
 | `add_flags` / `remove_flags` | Add or remove one or more IMAP flags. |
 | `delete` | Mark the message `\Deleted` and expunge it at the end of the mailbox pass. |
@@ -133,4 +133,5 @@ python -m pytest
 - The program fetches matching candidates directly from IMAP and never keeps its own message store.
 - Rules are evaluated mailbox by mailbox in the order they appear in the merged configuration.
 - The fallback move implementation expunges after the mailbox pass completes.
+- Cross-account `copy_to` and `move_to` targets refer to configured account `name` values, which must be unique.
 - `copy_to` and duplicate-aware `move_to` use heuristic duplicate detection. They avoid many duplicate messages, including cases where bodies match but attachments or headers differ, but they can still miss matches if mail is rewritten in transit or lacks enough stable metadata to narrow the search reliably.

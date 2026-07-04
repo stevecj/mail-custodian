@@ -6,7 +6,7 @@ from typing import Any
 
 import yaml
 
-from .models import AccountConfig, Actions, AppConfig, Criteria, Rule
+from .models import AccountConfig, Actions, ActionTarget, AppConfig, Criteria, Rule
 
 
 class ConfigError(ValueError):
@@ -75,6 +75,7 @@ def _build_app_config(data: dict[str, Any]) -> AppConfig:
         raise ConfigError("'log_level' must be a string")
 
     accounts = tuple(_build_account(index, raw) for index, raw in enumerate(accounts_data, start=1))
+    _validate_accounts(accounts)
     return AppConfig(log_level=log_level.upper(), accounts=accounts)
 
 
@@ -176,8 +177,8 @@ def _build_actions(data: dict[str, Any], context: str) -> Actions:
         raise ConfigError(f"{context}.actions cannot set both mark_read and mark_unread")
 
     actions = Actions(
-        move_to=_optional_string(data.get("move_to"), f"{context}.actions.move_to"),
-        copy_to=_optional_string(data.get("copy_to"), f"{context}.actions.copy_to"),
+        move_to=_build_action_target(data.get("move_to"), f"{context}.actions.move_to"),
+        copy_to=_build_action_target(data.get("copy_to"), f"{context}.actions.copy_to"),
         mark_read=mark_read,
         mark_unread=mark_unread,
         add_flags=_string_list(data.get("add_flags"), f"{context}.actions.add_flags"),
@@ -207,6 +208,25 @@ def _build_actions(data: dict[str, Any], context: str) -> Actions:
     return actions
 
 
+def _validate_accounts(accounts: tuple[AccountConfig, ...]) -> None:
+    account_names: set[str] = set()
+    for account in accounts:
+        if account.name in account_names:
+            raise ConfigError(f"duplicate account name: {account.name}")
+        account_names.add(account.name)
+
+    for account_index, account in enumerate(accounts, start=1):
+        for rule_index, rule in enumerate(account.rules, start=1):
+            for action_name, target in (("move_to", rule.actions.move_to), ("copy_to", rule.actions.copy_to)):
+                if target is None or target.account is None:
+                    continue
+                if target.account not in account_names:
+                    raise ConfigError(
+                        f"accounts[{account_index}].rules[{rule_index}].actions.{action_name}.account "
+                        f"references unknown account '{target.account}'"
+                    )
+
+
 def _ensure_mapping(value: Any, context: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ConfigError(f"{context} must be a mapping")
@@ -226,6 +246,20 @@ def _optional_string(value: Any, context: str) -> str | None:
     if not isinstance(value, str) or not value:
         raise ConfigError(f"{context} must be a non-empty string")
     return value
+
+
+def _build_action_target(value: Any, context: str) -> ActionTarget | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return ActionTarget(mailbox=value)
+    if not isinstance(value, dict):
+        raise ConfigError(f"{context} must be a string or mapping")
+
+    return ActionTarget(
+        mailbox=_require_string(value, "mailbox", context),
+        account=_optional_string(value.get("account"), f"{context}.account"),
+    )
 
 
 def _string_or_default(value: Any, default: str, context: str) -> str:

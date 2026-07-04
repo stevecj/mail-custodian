@@ -43,5 +43,23 @@ accounts:
             X-Priority:
               - High
         actions:
-          copy_to: Review/Spam
+          copy_to:
+            account: review
+            mailbox: Review/Spam
           mark_read: true
+
+  - name: review
+    host: imap.review.example.com
+    port: 993
+    ssl: true
+    username: steve-review@example.com
+    password_env: REVIEW_IMAP_PASSWORD
+    default_mailbox: INBOX
+    create_missing_mailboxes: true
+    rules:
+      - name: Keep copied review mail unread
+        mailbox: Review/Spam
+        criteria:
+          seen: true
+        actions:
+          mark_unread: true

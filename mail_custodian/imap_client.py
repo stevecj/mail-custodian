@@ -9,7 +9,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from html import unescape
 
-from .models import AccountConfig, ActionResult, Actions, Criteria, MessageData
+from .models import AccountConfig, ActionResult, Actions, ActionTarget, Criteria, MessageData
 
 LOGGER = logging.getLogger(__name__)
 COPY_ID_HEADER = "X-Mail-Custodian-Id"
@@ -100,34 +100,58 @@ class IMAPSession:
         *,
         create_missing_mailboxes: bool,
         dry_run: bool,
+        copy_session: "IMAPSession | None" = None,
+        copy_create_missing_mailboxes: bool | None = None,
+        move_session: "IMAPSession | None" = None,
+        move_create_missing_mailboxes: bool | None = None,
     ) -> ActionResult:
         uid = message.uid
         blocked = actions.stop_processing or bool(actions.move_to) or actions.delete
         expunge_needed = False
+        copy_session = copy_session or self
+        move_session = move_session or self
 
         if dry_run:
             LOGGER.info(
                 "dry-run UID %s in %s: copy_to=%s move_to=%s mark_read=%s mark_unread=%s add_flags=%s remove_flags=%s delete=%s",
                 uid,
                 self.current_mailbox,
-                actions.copy_to,
-                actions.move_to,
+                _format_action_target(actions.copy_to),
+                _format_action_target(actions.move_to),
                 actions.mark_read,
                 actions.mark_unread,
                 list(actions.add_flags),
                 list(actions.remove_flags),
                 actions.delete,
             )
-            return ActionResult(expunge_needed=actions.delete or bool(actions.move_to and "MOVE" not in self.capabilities), block_further_rules=blocked)
+            move_requires_delete = bool(actions.move_to) and (move_session is not self or "MOVE" not in self.capabilities)
+            return ActionResult(
+                expunge_needed=actions.delete or move_requires_delete,
+                block_further_rules=blocked,
+            )
         if actions.copy_to:
-            self._copy_message(message, actions.copy_to, create_missing_mailboxes=create_missing_mailboxes)
+            copy_session._copy_message(
+                message,
+                actions.copy_to.mailbox,
+                create_missing_mailboxes=create_missing_mailboxes
+                if copy_session is self
+                else bool(copy_create_missing_mailboxes),
+            )
 
         if actions.move_to:
-            expunge_needed = self._move_message(
-                message,
-                actions.move_to,
-                create_missing_mailboxes=create_missing_mailboxes,
-            ) or expunge_needed
+            if move_session is self:
+                expunge_needed = self._move_message(
+                    message,
+                    actions.move_to.mailbox,
+                    create_missing_mailboxes=create_missing_mailboxes,
+                ) or expunge_needed
+            else:
+                expunge_needed = self._move_message_to_other_session(
+                    message,
+                    target_session=move_session,
+                    target_mailbox=actions.move_to.mailbox,
+                    create_missing_mailboxes=bool(move_create_missing_mailboxes),
+                ) or expunge_needed
 
         if actions.mark_read:
             self._store_flags(uid, operation="+FLAGS.SILENT", flags=["\\Seen"])
@@ -195,12 +219,7 @@ class IMAPSession:
             LOGGER.info("skipping copy of UID %s to %s; matching message already exists", message.uid, target_mailbox)
             return
 
-        connection = self._require_connection()
-        append_flags = _format_flag_list(sorted(message.flags))
-        append_date = imaplib.Time2Internaldate(message.internal_date)
-        status, data = connection.append(target_mailbox, append_flags, append_date, message.raw_message)
-        if status != "OK":
-            raise RuntimeError(f"failed to append message UID {message.uid} to mailbox '{target_mailbox}': {data}")
+        self._append_message(target_mailbox, message)
 
     def _move_message(self, message: MessageData, target_mailbox: str, *, create_missing_mailboxes: bool) -> bool:
         self._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
@@ -219,6 +238,30 @@ class IMAPSession:
             return False
 
         self._uid_command("copy", message.uid, target_mailbox)
+        self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
+        return True
+
+    def _move_message_to_other_session(
+        self,
+        message: MessageData,
+        *,
+        target_session: "IMAPSession",
+        target_mailbox: str,
+        create_missing_mailboxes: bool,
+    ) -> bool:
+        target_session._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
+        if target_session._mailbox_contains_duplicate(target_mailbox, message):
+            LOGGER.info(
+                "deleting UID %s from %s; matching message already exists in %s:%s",
+                message.uid,
+                self.current_mailbox,
+                target_session.account.name,
+                target_mailbox,
+            )
+            self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
+            return True
+
+        target_session._append_message(target_mailbox, message)
         self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
         return True
 
@@ -254,6 +297,14 @@ class IMAPSession:
     def _store_flags(self, uid: str, *, operation: str, flags: list[str]) -> None:
         flag_list = _format_flag_list(flags)
         self._uid_command("store", uid, operation, flag_list)
+
+    def _append_message(self, target_mailbox: str, message: MessageData) -> None:
+        connection = self._require_connection()
+        append_flags = _format_flag_list(sorted(message.flags))
+        append_date = imaplib.Time2Internaldate(message.internal_date)
+        status, data = connection.append(target_mailbox, append_flags, append_date, message.raw_message)
+        if status != "OK":
+            raise RuntimeError(f"failed to append message UID {message.uid} to mailbox '{target_mailbox}': {data}")
 
     def _uid_command(self, command: str, *args: str) -> None:
         connection = self._require_connection()
@@ -373,3 +424,11 @@ def _format_flag_list(flags: list[str]) -> str | None:
     if len(flags) == 1:
         return flags[0]
     return f"({' '.join(flags)})"
+
+
+def _format_action_target(target: ActionTarget | None) -> str | None:
+    if target is None:
+        return None
+    if target.account is None:
+        return target.mailbox
+    return f"{target.account}:{target.mailbox}"

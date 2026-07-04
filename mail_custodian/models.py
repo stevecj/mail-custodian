@@ -66,9 +66,15 @@ class Criteria:
 
 
 @dataclass(frozen=True)
+class ActionTarget:
+    mailbox: str
+    account: str | None = None
+
+
+@dataclass(frozen=True)
 class Actions:
-    move_to: str | None = None
-    copy_to: str | None = None
+    move_to: ActionTarget | None = None
+    copy_to: ActionTarget | None = None
     mark_read: bool = False
     mark_unread: bool = False
     add_flags: tuple[str, ...] = ()

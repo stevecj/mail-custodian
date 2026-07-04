@@ -6,7 +6,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 
 from mail_custodian.imap_client import COPY_ID_HEADER, IMAPSession
-from mail_custodian.models import AccountConfig, Actions, Criteria, MessageData
+from mail_custodian.models import AccountConfig, Actions, ActionTarget, Criteria, MessageData
 
 
 class FakeConnection:
@@ -120,10 +120,10 @@ def _matches_search(message: EmailMessage, criteria: tuple[str, ...]) -> bool:
     return True
 
 
-def _build_session() -> IMAPSession:
+def _build_session(name: str = "test") -> IMAPSession:
     session = IMAPSession.__new__(IMAPSession)
     session.account = AccountConfig(
-        name="test",
+        name=name,
         host="imap.example.com",
         username="user",
         password="secret",
@@ -194,8 +194,8 @@ def test_apply_actions_creates_and_updates_mailboxes() -> None:
     result = session.apply_actions(
         message,
         Actions(
-            copy_to="Archive/Review",
-            move_to="Archive/Done",
+            copy_to=ActionTarget(mailbox="Archive/Review"),
+            move_to=ActionTarget(mailbox="Archive/Done"),
             mark_read=True,
             add_flags=("\\Flagged",),
             remove_flags=("$Junk",),
@@ -220,13 +220,13 @@ def test_copy_to_is_idempotent_without_stamping_headers() -> None:
 
     session.apply_actions(
         message,
-        Actions(copy_to="Archive/Review"),
+        Actions(copy_to=ActionTarget(mailbox="Archive/Review")),
         create_missing_mailboxes=True,
         dry_run=False,
     )
     session.apply_actions(
         message,
-        Actions(copy_to="Archive/Review"),
+        Actions(copy_to=ActionTarget(mailbox="Archive/Review")),
         create_missing_mailboxes=True,
         dry_run=False,
     )
@@ -244,7 +244,7 @@ def test_copy_to_does_not_treat_same_body_with_different_attachment_as_duplicate
 
     session.apply_actions(
         message,
-        Actions(copy_to="Archive/Review"),
+        Actions(copy_to=ActionTarget(mailbox="Archive/Review")),
         create_missing_mailboxes=True,
         dry_run=False,
     )
@@ -259,7 +259,7 @@ def test_move_to_deletes_source_when_duplicate_exists_in_destination() -> None:
 
     result = session.apply_actions(
         message,
-        Actions(move_to="Archive/Done"),
+        Actions(move_to=ActionTarget(mailbox="Archive/Done")),
         create_missing_mailboxes=True,
         dry_run=False,
     )
@@ -268,3 +268,43 @@ def test_move_to_deletes_source_when_duplicate_exists_in_destination() -> None:
     assert ("copy", ("42", "Archive/Done")) not in session.connection.uid_calls
     assert ("move", ("42", "Archive/Done")) not in session.connection.uid_calls
     assert ("store", ("42", "+FLAGS.SILENT", "\\Deleted")) in session.connection.uid_calls
+
+
+def test_copy_to_other_account_appends_message_on_target_session() -> None:
+    source_session = _build_session("source")
+    target_session = _build_session("review")
+    message = _build_message()
+
+    source_session.apply_actions(
+        message,
+        Actions(copy_to=ActionTarget(mailbox="Review/Spam", account="review")),
+        create_missing_mailboxes=True,
+        dry_run=False,
+        copy_session=target_session,
+        copy_create_missing_mailboxes=True,
+    )
+
+    assert target_session.connection.created_mailboxes == {"Review/Spam"}
+    assert target_session.connection.append_calls[0][0] == "Review/Spam"
+    assert not source_session.connection.uid_calls
+
+
+def test_move_to_other_account_copies_then_deletes_source() -> None:
+    source_session = _build_session("source")
+    target_session = _build_session("archive")
+    message = _build_message()
+
+    result = source_session.apply_actions(
+        message,
+        Actions(move_to=ActionTarget(mailbox="Archive/Done", account="archive")),
+        create_missing_mailboxes=True,
+        dry_run=False,
+        move_session=target_session,
+        move_create_missing_mailboxes=True,
+    )
+
+    assert result.expunge_needed is True
+    assert target_session.connection.created_mailboxes == {"Archive/Done"}
+    assert target_session.connection.append_calls[0][0] == "Archive/Done"
+    assert ("store", ("42", "+FLAGS.SILENT", "\\Deleted")) in source_session.connection.uid_calls
+    assert ("copy", ("42", "Archive/Done")) not in source_session.connection.uid_calls
