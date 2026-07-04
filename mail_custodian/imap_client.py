@@ -12,6 +12,7 @@ from html import unescape
 from .models import AccountConfig, ActionResult, Actions, Criteria, MessageData
 
 LOGGER = logging.getLogger(__name__)
+COPY_ID_HEADER = "X-Mail-Custodian-Id"
 
 
 class IMAPSession:
@@ -53,15 +54,7 @@ class IMAPSession:
         self.current_mailbox = mailbox
 
     def search_uids(self, criteria: Criteria) -> list[str]:
-        connection = self._require_connection()
-        status, data = connection.uid("search", None, *self._build_search_terms(criteria))
-        if status != "OK":
-            raise RuntimeError(f"failed to search mailbox '{self.current_mailbox}': {data}")
-
-        raw = data[0] if data and data[0] else b""
-        if isinstance(raw, bytes):
-            return [item for item in raw.decode("ascii", errors="ignore").split() if item]
-        return []
+        return self._search_selected_mailbox_uids(self._build_search_terms(criteria))
 
     def fetch_message(self, uid: str) -> MessageData:
         connection = self._require_connection()
@@ -97,16 +90,18 @@ class IMAPSession:
             internal_date=_parse_internal_date(metadata),
             has_attachments=_has_attachments(email_message),
             email_message=email_message,
+            raw_message=raw_message,
         )
 
     def apply_actions(
         self,
-        uid: str,
+        message: MessageData,
         actions: Actions,
         *,
         create_missing_mailboxes: bool,
         dry_run: bool,
     ) -> ActionResult:
+        uid = message.uid
         blocked = actions.stop_processing or bool(actions.move_to) or actions.delete
         expunge_needed = False
 
@@ -124,19 +119,15 @@ class IMAPSession:
                 actions.delete,
             )
             return ActionResult(expunge_needed=actions.delete or bool(actions.move_to and "MOVE" not in self.capabilities), block_further_rules=blocked)
-
         if actions.copy_to:
-            self._ensure_target_mailbox(actions.copy_to, create_missing_mailboxes)
-            self._uid_command("copy", uid, actions.copy_to)
+            self._copy_message(message, actions.copy_to, create_missing_mailboxes=create_missing_mailboxes)
 
         if actions.move_to:
-            self._ensure_target_mailbox(actions.move_to, create_missing_mailboxes)
-            if "MOVE" in self.capabilities:
-                self._uid_command("move", uid, actions.move_to)
-            else:
-                self._uid_command("copy", uid, actions.move_to)
-                self._store_flags(uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
-                expunge_needed = True
+            expunge_needed = self._move_message(
+                message,
+                actions.move_to,
+                create_missing_mailboxes=create_missing_mailboxes,
+            ) or expunge_needed
 
         if actions.mark_read:
             self._store_flags(uid, operation="+FLAGS.SILENT", flags=["\\Seen"])
@@ -198,8 +189,70 @@ class IMAPSession:
         if create_status != "OK":
             raise RuntimeError(f"failed to create mailbox '{mailbox}': {create_data}")
 
+    def _copy_message(self, message: MessageData, target_mailbox: str, *, create_missing_mailboxes: bool) -> None:
+        self._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
+        if self._mailbox_contains_duplicate(target_mailbox, message):
+            LOGGER.info("skipping copy of UID %s to %s; matching message already exists", message.uid, target_mailbox)
+            return
+
+        connection = self._require_connection()
+        append_flags = _format_flag_list(sorted(message.flags))
+        append_date = imaplib.Time2Internaldate(message.internal_date)
+        status, data = connection.append(target_mailbox, append_flags, append_date, message.raw_message)
+        if status != "OK":
+            raise RuntimeError(f"failed to append message UID {message.uid} to mailbox '{target_mailbox}': {data}")
+
+    def _move_message(self, message: MessageData, target_mailbox: str, *, create_missing_mailboxes: bool) -> bool:
+        self._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
+        if self._mailbox_contains_duplicate(target_mailbox, message):
+            LOGGER.info(
+                "deleting UID %s from %s; matching message already exists in %s",
+                message.uid,
+                self.current_mailbox,
+                target_mailbox,
+            )
+            self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
+            return True
+
+        if "MOVE" in self.capabilities:
+            self._uid_command("move", message.uid, target_mailbox)
+            return False
+
+        self._uid_command("copy", message.uid, target_mailbox)
+        self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
+        return True
+
+    def _mailbox_contains_duplicate(self, mailbox: str, message: MessageData) -> bool:
+        search_terms = _candidate_search_terms(message)
+        if not search_terms:
+            return False
+
+        original_mailbox = self.current_mailbox
+        try:
+            self.select_mailbox(mailbox)
+            for candidate_uid in self._search_selected_mailbox_uids(search_terms):
+                if mailbox == message.mailbox and candidate_uid == message.uid:
+                    continue
+                if _messages_match(message, self.fetch_message(candidate_uid)):
+                    return True
+            return False
+        finally:
+            if original_mailbox and self.current_mailbox != original_mailbox:
+                self.select_mailbox(original_mailbox)
+
+    def _search_selected_mailbox_uids(self, search_terms: list[str]) -> list[str]:
+        connection = self._require_connection()
+        status, data = connection.uid("search", None, *search_terms)
+        if status != "OK":
+            raise RuntimeError(f"failed to search mailbox '{self.current_mailbox}': {data}")
+
+        raw = data[0] if data and data[0] else b""
+        if isinstance(raw, bytes):
+            return [item for item in raw.decode("ascii", errors="ignore").split() if item]
+        return []
+
     def _store_flags(self, uid: str, *, operation: str, flags: list[str]) -> None:
-        flag_list = f"({' '.join(flags)})" if len(flags) > 1 else flags[0]
+        flag_list = _format_flag_list(flags)
         self._uid_command("store", uid, operation, flag_list)
 
     def _uid_command(self, command: str, *args: str) -> None:
@@ -280,3 +333,43 @@ def _html_to_text(value: str) -> str:
 
 def _has_attachments(message: EmailMessage) -> bool:
     return any(part.get_content_disposition() == "attachment" for part in message.walk())
+
+
+def _header_value(message: EmailMessage, header_name: str) -> str | None:
+    value = message.get(header_name, "")
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _candidate_search_terms(message: MessageData) -> list[str]:
+    message_id = _header_value(message.email_message, "Message-ID")
+    if message_id:
+        return ["HEADER", "Message-ID", message_id]
+
+    terms: list[str] = []
+    for header_name in ("Date", "From", "Subject", "To", "Cc"):
+        header_value = _header_value(message.email_message, header_name)
+        if header_value:
+            terms.extend(["HEADER", header_name, header_value])
+    return terms
+
+
+def _messages_match(first: MessageData, second: MessageData) -> bool:
+    return _canonical_message_bytes(first.raw_message) == _canonical_message_bytes(second.raw_message)
+
+
+def _canonical_message_bytes(raw_message: bytes) -> bytes:
+    message = BytesParser(policy=policy.default).parsebytes(raw_message)
+    while COPY_ID_HEADER in message:
+        del message[COPY_ID_HEADER]
+    return message.as_bytes(policy=policy.SMTP)
+
+
+def _format_flag_list(flags: list[str]) -> str | None:
+    if not flags:
+        return None
+    if len(flags) == 1:
+        return flags[0]
+    return f"({' '.join(flags)})"

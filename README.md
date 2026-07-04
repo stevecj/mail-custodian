@@ -35,6 +35,12 @@ Or install it as a package:
 pip install .
 ```
 
+For test work, install the test extra:
+
+```bash
+pip install -e '.[test]'
+```
+
 ## Configuration
 
 Use `config.example.yaml` as a starting point.
@@ -87,7 +93,7 @@ If a rule has no criteria, it matches every message in its mailbox.
 | Key | Meaning |
 | --- | --- |
 | `move_to` | Move matching messages to another mailbox. Uses IMAP `MOVE` when supported, otherwise `COPY` + `\Deleted`. |
-| `copy_to` | Copy matching messages to another mailbox. |
+| `copy_to` | Copy matching messages to another mailbox. Copies are best-effort idempotent: Mail Custodian searches for likely matches by stable headers, then compares the full message content before deciding whether to skip a duplicate copy. |
 | `mark_read` / `mark_unread` | Add or remove the `\Seen` flag. |
 | `add_flags` / `remove_flags` | Add or remove one or more IMAP flags. |
 | `delete` | Mark the message `\Deleted` and expunge it at the end of the mailbox pass. |
@@ -111,6 +117,12 @@ Dry run:
 mail-custodian --config config.yaml --dry-run --verbose
 ```
 
+## Tests
+
+```bash
+python -m pytest
+```
+
 ## Cron example
 
 ```cron
@@ -122,3 +134,4 @@ mail-custodian --config config.yaml --dry-run --verbose
 - The program fetches matching candidates directly from IMAP and never keeps its own message store.
 - Rules are evaluated mailbox by mailbox in the order they appear in the merged configuration.
 - The fallback move implementation expunges after the mailbox pass completes.
+- `copy_to` duplicate detection is heuristic. It avoids many duplicate copies, including messages with identical bodies but different attachments or headers, but it can still miss matches if mail is rewritten in transit or lacks enough stable metadata to narrow the search reliably.

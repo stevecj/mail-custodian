@@ -119,6 +119,7 @@ class MessageData:
     internal_date: datetime
     has_attachments: bool
     email_message: EmailMessage
+    raw_message: bytes = b""
 
     def has_flag(self, flag: str) -> bool:
         return flag in self.flags

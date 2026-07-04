@@ -52,7 +52,7 @@ class FilterEngine:
                             message.subject,
                         )
                         result = session.apply_actions(
-                            uid,
+                            message,
                             rule.actions,
                             create_missing_mailboxes=account.create_missing_mailboxes,
                             dry_run=self.dry_run,
