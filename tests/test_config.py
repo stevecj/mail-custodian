@@ -6,7 +6,7 @@ import textwrap
 import unittest
 from pathlib import Path
 
-from email_organizer.config import load_config
+from mail_custodian.config import load_config
 
 
 class ConfigTests(unittest.TestCase):

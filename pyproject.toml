@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "email-organizer"
+name = "mail-custodian"
 version = "0.1.0"
 description = "Cron-friendly IMAP email filtering with YAML configuration."
 readme = "README.md"
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-email-organizer = "email_organizer.__main__:main"
+mail-custodian = "mail_custodian.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["email_organizer*"]
+include = ["mail_custodian*"]

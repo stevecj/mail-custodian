@@ -5,8 +5,8 @@ from email.message import EmailMessage
 from email.utils import format_datetime
 import unittest
 
-from email_organizer.imap_client import _extract_body_text
-from email_organizer.models import Criteria, MessageData
+from mail_custodian.imap_client import _extract_body_text
+from mail_custodian.models import Criteria, MessageData
 
 
 class RuleMatchingTests(unittest.TestCase):

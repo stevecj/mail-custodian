@@ -28,7 +28,7 @@ def main() -> int:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="email-organizer",
+        prog="mail-custodian",
         description="Apply YAML-defined IMAP filtering rules from cron or other schedulers.",
     )
     parser.add_argument(

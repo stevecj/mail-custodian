@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import unittest
 
-from email_organizer.imap_client import IMAPSession
-from email_organizer.models import AccountConfig, Actions, Criteria
+from mail_custodian.imap_client import IMAPSession
+from mail_custodian.models import AccountConfig, Actions, Criteria
 
 
 class FakeConnection:
