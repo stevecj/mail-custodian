@@ -90,6 +90,52 @@ def test_load_config_merges_includes_and_multiple_files(
     assert config.accounts[2].rules[0].actions.copy_to.mailbox == "@root/Shared/Alerts"
 
 
+def test_load_config_expands_shared_rules_into_target_accounts(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            shared_rules:
+              - name: shared spam quarantine
+                accounts:
+                  - personal
+                  - work
+                mailbox: "@root"
+                criteria:
+                  from: spammer@example.com
+                actions:
+                  copy_to:
+                    mailbox: "@root/Spam"
+            accounts:
+              - name: personal
+                host: imap.personal.test
+                username: personal-user
+                password: personal-secret
+                mailbox_root: INBOX
+                mailbox_delimiter: .
+                rules:
+                  - name: local cleanup
+                    actions:
+                      mark_read: true
+              - name: work
+                host: imap.work.test
+                username: work-user
+                password: work-secret
+                mailbox_root: Mail
+                mailbox_delimiter: /
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config([str(tmp_path / "config.yaml")])
+
+    assert [rule.name for rule in config.accounts[0].rules] == ["local cleanup", "shared spam quarantine"]
+    assert config.accounts[0].rules[1].mailbox == "@root"
+    assert config.accounts[0].rules[1].actions.copy_to is not None
+    assert config.accounts[0].rules[1].actions.copy_to.mailbox == "@root/Spam"
+    assert [rule.name for rule in config.accounts[1].rules] == ["shared spam quarantine"]
+
+
 def test_load_config_rejects_unknown_cross_account_target(tmp_path: Path) -> None:
     (tmp_path / "config.yaml").write_text(
         textwrap.dedent(
@@ -116,3 +162,31 @@ def test_load_config_rejects_unknown_cross_account_target(tmp_path: Path) -> Non
         assert "references unknown account 'archive'" in str(exc)
     else:
         raise AssertionError("expected unknown target account to raise an error")
+
+
+def test_load_config_rejects_unknown_shared_rule_account(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            shared_rules:
+              - name: shared rule
+                accounts:
+                  - missing
+                actions:
+                  mark_read: true
+            accounts:
+              - name: personal
+                host: imap.personal.test
+                username: personal-user
+                password: personal-secret
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    try:
+        load_config([str(tmp_path / "config.yaml")])
+    except ValueError as exc:
+        assert "shared_rules[1].accounts references unknown account 'missing'" in str(exc)
+    else:
+        raise AssertionError("expected unknown shared rule account to raise an error")

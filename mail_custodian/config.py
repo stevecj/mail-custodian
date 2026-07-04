@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,15 @@ from .models import AccountConfig, Actions, ActionTarget, AppConfig, Criteria, R
 
 class ConfigError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class _SharedRuleSpec:
+    accounts: tuple[str, ...]
+    name: str
+    mailbox: str | None
+    criteria: Criteria
+    actions: Actions
 
 
 def load_config(paths: list[str]) -> AppConfig:
@@ -69,13 +79,23 @@ def _build_app_config(data: dict[str, Any]) -> AppConfig:
     accounts_data = data.get("accounts")
     if not isinstance(accounts_data, list) or not accounts_data:
         raise ConfigError("config must define a non-empty 'accounts' list")
+    shared_rules_data = data.get("shared_rules", [])
+    if shared_rules_data and not isinstance(shared_rules_data, list):
+        raise ConfigError("'shared_rules' must be a list")
 
     log_level = data.get("log_level", "INFO")
     if not isinstance(log_level, str):
         raise ConfigError("'log_level' must be a string")
 
     accounts = tuple(_build_account(index, raw) for index, raw in enumerate(accounts_data, start=1))
+    shared_rules = tuple(
+        _build_shared_rule(index, raw_rule)
+        for index, raw_rule in enumerate(shared_rules_data, start=1)
+    )
+    accounts = _apply_shared_rules(accounts, shared_rules)
     _validate_accounts(accounts)
+    if not any(account.rules for account in accounts):
+        raise ConfigError("config must define at least one rule across 'accounts' and 'shared_rules'")
     return AppConfig(log_level=log_level.upper(), accounts=accounts)
 
 
@@ -96,18 +116,15 @@ def _build_account(index: int, data: Any) -> AccountConfig:
         if not password:
             raise ConfigError(f"{context}.password_env points to an unset environment variable: {password_env}")
 
-    rules_data = mapping.get("rules")
-    if not isinstance(rules_data, list) or not rules_data:
-        raise ConfigError(f"{context} must define a non-empty 'rules' list")
+    rules_data = mapping.get("rules", [])
+    if not isinstance(rules_data, list):
+        raise ConfigError(f"{context}.rules must be a list")
 
     default_mailbox = mapping.get("default_mailbox", "INBOX")
     if not isinstance(default_mailbox, str):
         raise ConfigError(f"{context}.default_mailbox must be a string")
 
-    rules = tuple(
-        _build_rule(rule_index, raw_rule, default_mailbox)
-        for rule_index, raw_rule in enumerate(rules_data, start=1)
-    )
+    rules = _build_rule_list(rules_data, default_mailbox, f"{context}.rules")
 
     return AccountConfig(
         name=_require_string(mapping, "name", context),
@@ -133,8 +150,15 @@ def _build_account(index: int, data: Any) -> AccountConfig:
     )
 
 
-def _build_rule(index: int, data: Any, default_mailbox: str) -> Rule:
-    context = f"rule[{index}]"
+def _build_rule_list(rules_data: list[Any], default_mailbox: str, context: str) -> tuple[Rule, ...]:
+    return tuple(
+        _build_rule(rule_index, raw_rule, default_mailbox, context=context)
+        for rule_index, raw_rule in enumerate(rules_data, start=1)
+    )
+
+
+def _build_rule(index: int, data: Any, default_mailbox: str, *, context: str = "rule") -> Rule:
+    context = f"{context}[{index}]"
     mapping = _ensure_mapping(data, context)
     return Rule(
         name=_require_string(mapping, "name", context),
@@ -142,6 +166,53 @@ def _build_rule(index: int, data: Any, default_mailbox: str) -> Rule:
         criteria=_build_criteria(_ensure_mapping(mapping.get("criteria", {}), f"{context}.criteria")),
         actions=_build_actions(_ensure_mapping(mapping.get("actions", {}), f"{context}.actions"), context),
     )
+
+
+def _build_shared_rule(index: int, data: Any) -> _SharedRuleSpec:
+    context = f"shared_rules[{index}]"
+    mapping = _ensure_mapping(data, context)
+    accounts = _string_list(mapping.get("accounts"), f"{context}.accounts")
+    if not accounts:
+        raise ConfigError(f"{context}.accounts must define at least one account name")
+    if len(set(accounts)) != len(accounts):
+        raise ConfigError(f"{context}.accounts must not contain duplicates")
+
+    return _SharedRuleSpec(
+        accounts=accounts,
+        name=_require_string(mapping, "name", context),
+        mailbox=_optional_string(mapping.get("mailbox"), f"{context}.mailbox"),
+        criteria=_build_criteria(_ensure_mapping(mapping.get("criteria", {}), f"{context}.criteria")),
+        actions=_build_actions(_ensure_mapping(mapping.get("actions", {}), f"{context}.actions"), context),
+    )
+
+
+def _apply_shared_rules(
+    accounts: tuple[AccountConfig, ...],
+    shared_rules: tuple[_SharedRuleSpec, ...],
+) -> tuple[AccountConfig, ...]:
+    if not shared_rules:
+        return accounts
+
+    accounts_by_name = {account.name: account for account in accounts}
+    expanded_rules: dict[str, list[Rule]] = {account.name: list(account.rules) for account in accounts}
+
+    for index, shared_rule in enumerate(shared_rules, start=1):
+        for account_name in shared_rule.accounts:
+            account = accounts_by_name.get(account_name)
+            if account is None:
+                raise ConfigError(
+                    f"shared_rules[{index}].accounts references unknown account '{account_name}'"
+                )
+            expanded_rules[account_name].append(
+                Rule(
+                    name=shared_rule.name,
+                    mailbox=shared_rule.mailbox or account.default_mailbox,
+                    criteria=shared_rule.criteria,
+                    actions=shared_rule.actions,
+                )
+            )
+
+    return tuple(replace(account, rules=tuple(expanded_rules[account.name])) for account in accounts)
 
 
 def _build_criteria(data: dict[str, Any]) -> Criteria:

@@ -1,4 +1,23 @@
 log_level: INFO
+shared_rules:
+  - name: Quarantine likely job spam
+    accounts:
+      - personal
+      - review
+    mailbox: "@root"
+    criteria:
+      match: any
+      body_contains:
+        - unsubscribe here
+        - earn extra income
+      header_contains:
+        X-Priority:
+          - High
+    actions:
+      copy_to:
+        mailbox: "@root/Spam"
+      mark_read: true
+
 accounts:
   - name: personal
     host: imap.example.com
@@ -34,21 +53,6 @@ accounts:
         actions:
           add_flags:
             - \Flagged
-
-      - name: Quarantine likely job spam
-        criteria:
-          match: any
-          body_contains:
-            - unsubscribe here
-            - earn extra income
-          header_contains:
-            X-Priority:
-              - High
-        actions:
-          copy_to:
-            account: review
-            mailbox: "@root/Spam"
-          mark_read: true
 
   - name: review
     host: imap.review.example.com

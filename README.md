@@ -50,6 +50,7 @@ Use `config.example.yaml` as a starting point.
 | --- | --- | --- |
 | `log_level` | string | Default Python logging level, e.g. `INFO` or `DEBUG`. |
 | `includes` | list | Optional list of YAML files to merge before the current file. Paths are relative to the file that declares them. |
+| `shared_rules` | list | Optional reusable rules applied to one or more named accounts. |
 | `accounts` | list | One or more IMAP account definitions. |
 
 ### Account keys
@@ -68,7 +69,7 @@ Use `config.example.yaml` as a starting point.
 | `default_mailbox` | string | Mailbox used when a rule omits `mailbox`. |
 | `create_missing_mailboxes` | boolean | Create `move_to`/`copy_to` target mailboxes for this account when missing. |
 | `timeout` | integer | Socket timeout in seconds. |
-| `rules` | list | Filtering rules. |
+| `rules` | list | Account-local filtering rules. |
 
 Set either `password` or `password_env`. `password_env` is recommended for cron jobs.
 
@@ -90,6 +91,29 @@ All configured criteria are combined with `AND` by default. Set `match: any` to 
 If a rule has no criteria, it matches every message in its mailbox.
 
 Use `@root` to refer to the configured mailbox root, and `@root/...` to build child paths with the account's `mailbox_delimiter`. Quote these values in YAML because `@` cannot start an unquoted scalar. For example, `"@root/Archive/Newsletters"` resolves to `INBOX.Archive.Newsletters` when `mailbox_root: INBOX` and `mailbox_delimiter: .`.
+
+### Shared rules
+
+Use `shared_rules` for rules you want to define once and apply to multiple accounts.
+
+Each shared rule uses the same rule shape as an account-local rule, plus an `accounts` list naming the target accounts:
+
+```yaml
+shared_rules:
+  - name: quarantine likely job spam
+    accounts:
+      - personal
+      - review
+    mailbox: "@root"
+    criteria:
+      body_contains:
+        - unsubscribe here
+    actions:
+      copy_to:
+        mailbox: "@root/Spam"
+```
+
+Shared rules are appended to each listed account's local `rules` in the order they appear.
 
 ### Rule actions
 
@@ -136,6 +160,7 @@ python -m pytest
 
 - The program fetches matching candidates directly from IMAP and never keeps its own message store.
 - Rules are evaluated mailbox by mailbox in the order they appear in the merged configuration.
+- Shared rules are expanded into each listed account during config loading, after that account's local rules.
 - The fallback move implementation expunges after the mailbox pass completes.
 - Cross-account `copy_to` and `move_to` targets refer to configured account `name` values, which must be unique.
 - `copy_to` and duplicate-aware `move_to` use heuristic duplicate detection. They avoid many duplicate messages, including cases where bodies match but attachments or headers differ, but they can still miss matches if mail is rewritten in transit or lacks enough stable metadata to narrow the search reliably.
