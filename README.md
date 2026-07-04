@@ -1,0 +1,113 @@
+# email-organizer
+
+`email-organizer` is a cron-friendly IMAP filtering application. It reads one or more YAML files, connects directly to IMAP mailboxes, evaluates rules against live messages, and applies actions like copy, move, flag, mark read/unread, or delete. It does not store mail locally and does not provide an interactive UI.
+
+## Features
+
+- IMAP-only operation using Python's standard `imaplib`
+- YAML configuration with support for `includes` and repeated `--config` arguments
+- Rule criteria similar to common mail client filters
+- Cron-safe CLI with `--dry-run` mode for safe rollout
+- No message database; messages remain on the IMAP server
+
+## Install
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Or install it as a package:
+
+```bash
+pip install .
+```
+
+## Configuration
+
+Use `config.example.yaml` as a starting point.
+
+### Top-level keys
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `log_level` | string | Default Python logging level, e.g. `INFO` or `DEBUG`. |
+| `includes` | list | Optional list of YAML files to merge before the current file. Paths are relative to the file that declares them. |
+| `accounts` | list | One or more IMAP account definitions. |
+
+### Account keys
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `name` | string | Label used in logs. |
+| `host` | string | IMAP server hostname. |
+| `port` | integer | IMAP server port, default `993`. |
+| `ssl` | boolean | Use IMAPS when `true`, plain IMAP when `false`. |
+| `username` | string | IMAP login user. |
+| `password` | string | IMAP password. |
+| `password_env` | string | Environment variable name containing the password. |
+| `default_mailbox` | string | Mailbox used when a rule omits `mailbox`. |
+| `create_missing_mailboxes` | boolean | Create `move_to`/`copy_to` targets when missing. |
+| `timeout` | integer | Socket timeout in seconds. |
+| `rules` | list | Filtering rules. |
+
+Set either `password` or `password_env`. `password_env` is recommended for cron jobs.
+
+### Rule criteria
+
+All configured criteria are combined with `AND` by default. Set `match: any` to use `OR`.
+
+| Key | Meaning |
+| --- | --- |
+| `from`, `to`, `cc` | Case-insensitive substring match against the address headers. |
+| `subject_contains` | Case-insensitive substring match against the subject. |
+| `body_contains` | Case-insensitive substring match against decoded body text. |
+| `header_contains` | Mapping of header name to string or list of strings to search. |
+| `seen`, `flagged`, `answered` | Match IMAP flags. |
+| `has_attachments` | Match messages with or without attachments. |
+| `older_than_days`, `younger_than_days` | Compare message age using IMAP `INTERNALDATE`. |
+| `size_larger_than`, `size_smaller_than` | Compare RFC822 message size in bytes. |
+
+If a rule has no criteria, it matches every message in its mailbox.
+
+### Rule actions
+
+| Key | Meaning |
+| --- | --- |
+| `move_to` | Move matching messages to another mailbox. Uses IMAP `MOVE` when supported, otherwise `COPY` + `\Deleted`. |
+| `copy_to` | Copy matching messages to another mailbox. |
+| `mark_read` / `mark_unread` | Add or remove the `\Seen` flag. |
+| `add_flags` / `remove_flags` | Add or remove one or more IMAP flags. |
+| `delete` | Mark the message `\Deleted` and expunge it at the end of the mailbox pass. |
+| `stop_processing` | Stop later rules from touching the same message in the same run. |
+
+## Running
+
+```bash
+email-organizer --config config.yaml
+```
+
+Merge multiple YAML files:
+
+```bash
+email-organizer --config common.yaml --config personal.yaml
+```
+
+Dry run:
+
+```bash
+email-organizer --config config.yaml --dry-run --verbose
+```
+
+## Cron example
+
+```cron
+*/10 * * * * PERSONAL_IMAP_PASSWORD='super-secret' /opt/email-organizer/.venv/bin/email-organizer --config /etc/email-organizer/config.yaml >> /var/log/email-organizer.log 2>&1
+```
+
+## Notes
+
+- The program fetches matching candidates directly from IMAP and never keeps its own message store.
+- Rules are evaluated mailbox by mailbox in the order they appear in the merged configuration.
+- The fallback move implementation expunges after the mailbox pass completes.

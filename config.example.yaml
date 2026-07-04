@@ -1,0 +1,47 @@
+log_level: INFO
+accounts:
+  - name: personal
+    host: imap.example.com
+    port: 993
+    ssl: true
+    username: steve@example.com
+    password_env: PERSONAL_IMAP_PASSWORD
+    default_mailbox: INBOX
+    create_missing_mailboxes: true
+    rules:
+      - name: Move newsletters to archive
+        mailbox: INBOX
+        criteria:
+          from:
+            - newsletter@example.com
+          subject_contains:
+            - Weekly Update
+          older_than_days: 3
+        actions:
+          move_to: Archive/Newsletters
+          mark_read: true
+          stop_processing: true
+
+      - name: Flag invoices with attachments
+        criteria:
+          match: all
+          from:
+            - billing@example.net
+          has_attachments: true
+          seen: false
+        actions:
+          add_flags:
+            - \Flagged
+
+      - name: Quarantine likely job spam
+        criteria:
+          match: any
+          body_contains:
+            - unsubscribe here
+            - earn extra income
+          header_contains:
+            X-Priority:
+              - High
+        actions:
+          copy_to: Review/Spam
+          mark_read: true
