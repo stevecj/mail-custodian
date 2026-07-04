@@ -6,11 +6,13 @@ accounts:
     ssl: true
     username: steve@example.com
     password_env: PERSONAL_IMAP_PASSWORD
-    default_mailbox: INBOX
+    mailbox_root: INBOX
+    mailbox_delimiter: /
+    default_mailbox: "@root"
     create_missing_mailboxes: true
     rules:
       - name: Move newsletters to archive
-        mailbox: INBOX
+        mailbox: "@root"
         criteria:
           from:
             - newsletter@example.com
@@ -18,7 +20,7 @@ accounts:
             - Weekly Update
           older_than_days: 3
         actions:
-          move_to: Archive/Newsletters
+          move_to: "@root/Archive/Newsletters"
           mark_read: true
           stop_processing: true
 
@@ -45,7 +47,7 @@ accounts:
         actions:
           copy_to:
             account: review
-            mailbox: Review/Spam
+            mailbox: "@root/Spam"
           mark_read: true
 
   - name: review
@@ -54,11 +56,13 @@ accounts:
     ssl: true
     username: steve-review@example.com
     password_env: REVIEW_IMAP_PASSWORD
-    default_mailbox: INBOX
+    mailbox_root: Mail
+    mailbox_delimiter: .
+    default_mailbox: "@root"
     create_missing_mailboxes: true
     rules:
       - name: Keep copied review mail unread
-        mailbox: Review/Spam
+        mailbox: "@root/Spam"
         criteria:
           seen: true
         actions:

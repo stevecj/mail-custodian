@@ -117,6 +117,12 @@ def _build_account(index: int, data: Any) -> AccountConfig:
         port=_optional_int(mapping.get("port"), f"{context}.port", default=993),
         ssl=_optional_bool(mapping.get("ssl"), f"{context}.ssl", default=True),
         timeout=_optional_int(mapping.get("timeout"), f"{context}.timeout", default=30),
+        mailbox_root=_optional_string(mapping.get("mailbox_root"), f"{context}.mailbox_root", default="INBOX"),
+        mailbox_delimiter=_optional_string(
+            mapping.get("mailbox_delimiter"),
+            f"{context}.mailbox_delimiter",
+            default="/",
+        ),
         default_mailbox=default_mailbox,
         create_missing_mailboxes=_optional_bool(
             mapping.get("create_missing_mailboxes"),
@@ -240,9 +246,9 @@ def _require_string(mapping: dict[str, Any], key: str, context: str) -> str:
     return value
 
 
-def _optional_string(value: Any, context: str) -> str | None:
+def _optional_string(value: Any, context: str, default: str | None = None) -> str | None:
     if value is None:
-        return None
+        return default
     if not isinstance(value, str) or not value:
         raise ConfigError(f"{context} must be a non-empty string")
     return value

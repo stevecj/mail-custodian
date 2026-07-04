@@ -63,6 +63,8 @@ Use `config.example.yaml` as a starting point.
 | `username` | string | IMAP login user. |
 | `password` | string | IMAP password. |
 | `password_env` | string | Environment variable name containing the password. |
+| `mailbox_root` | string | Mailbox name that `@root` resolves to for this account. Defaults to `INBOX`. |
+| `mailbox_delimiter` | string | Separator used when expanding `@root/...` paths for this account. Defaults to `/`. |
 | `default_mailbox` | string | Mailbox used when a rule omits `mailbox`. |
 | `create_missing_mailboxes` | boolean | Create `move_to`/`copy_to` target mailboxes for this account when missing. |
 | `timeout` | integer | Socket timeout in seconds. |
@@ -87,12 +89,14 @@ All configured criteria are combined with `AND` by default. Set `match: any` to 
 
 If a rule has no criteria, it matches every message in its mailbox.
 
+Use `@root` to refer to the configured mailbox root, and `@root/...` to build child paths with the account's `mailbox_delimiter`. Quote these values in YAML because `@` cannot start an unquoted scalar. For example, `"@root/Archive/Newsletters"` resolves to `INBOX.Archive.Newsletters` when `mailbox_root: INBOX` and `mailbox_delimiter: .`.
+
 ### Rule actions
 
 | Key | Meaning |
 | --- | --- |
-| `move_to` | Move matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to move into a different configured account. Before moving, Mail Custodian checks the destination for a likely duplicate using the same heuristic as `copy_to`; if one is found, it deletes the source message instead of creating another copy. Same-account moves use IMAP `MOVE` when supported, otherwise `COPY` + `\Deleted`; cross-account moves append to the destination account and then delete the source. |
-| `copy_to` | Copy matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to copy into a different configured account. Copies are best-effort idempotent: Mail Custodian searches for likely matches by stable headers, then compares the full message content before deciding whether to skip a duplicate copy. |
+| `move_to` | Move matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to move into a different configured account. Mailbox values also accept `@root` and `@root/...`, resolved against the destination account. Before moving, Mail Custodian checks the destination for a likely duplicate using the same heuristic as `copy_to`; if one is found, it deletes the source message instead of creating another copy. Same-account moves use IMAP `MOVE` when supported, otherwise `COPY` + `\Deleted`; cross-account moves append to the destination account and then delete the source. |
+| `copy_to` | Copy matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to copy into a different configured account. Mailbox values also accept `@root` and `@root/...`, resolved against the destination account. Copies are best-effort idempotent: Mail Custodian searches for likely matches by stable headers, then compares the full message content before deciding whether to skip a duplicate copy. |
 | `mark_read` / `mark_unread` | Add or remove the `\Seen` flag. |
 | `add_flags` / `remove_flags` | Add or remove one or more IMAP flags. |
 | `delete` | Mark the message `\Deleted` and expunge it at the end of the mailbox pass. |

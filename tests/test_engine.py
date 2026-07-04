@@ -104,13 +104,15 @@ def test_engine_routes_cross_account_action_to_target_session(monkeypatch) -> No
                 host="imap.source.test",
                 username="source-user",
                 password="source-secret",
+                mailbox_root="INBOX",
+                mailbox_delimiter=".",
                 create_missing_mailboxes=False,
                 rules=(
                     Rule(
                         name="copy elsewhere",
-                        mailbox="INBOX",
+                        mailbox="@root",
                         criteria=Criteria(),
-                        actions=Actions(copy_to=ActionTarget(mailbox="Review/Spam", account="review")),
+                        actions=Actions(copy_to=ActionTarget(mailbox="@root/Review/Spam", account="review")),
                     ),
                 ),
             ),
@@ -119,11 +121,13 @@ def test_engine_routes_cross_account_action_to_target_session(monkeypatch) -> No
                 host="imap.review.test",
                 username="review-user",
                 password="review-secret",
+                mailbox_root="Mail",
+                mailbox_delimiter=".",
                 create_missing_mailboxes=True,
                 rules=(
                     Rule(
                         name="noop",
-                        mailbox="INBOX",
+                        mailbox="@root",
                         criteria=Criteria(sender=("nobody",)),
                         actions=Actions(mark_read=True),
                     ),
@@ -136,5 +140,7 @@ def test_engine_routes_cross_account_action_to_target_session(monkeypatch) -> No
 
     source_session = FakeSession.instances["source"]
     review_session = FakeSession.instances["review"]
+    assert source_session.selected_mailboxes == ["INBOX"]
     assert source_session.apply_calls[0]["copy_session"] is review_session
     assert source_session.apply_calls[0]["copy_create_missing_mailboxes"] is True
+    assert source_session.apply_calls[0]["actions"].copy_to == ActionTarget(mailbox="Mail.Review.Spam", account="review")

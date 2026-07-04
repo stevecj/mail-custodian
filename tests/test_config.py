@@ -58,16 +58,18 @@ def test_load_config_merges_includes_and_multiple_files(
                 host: imap.override.test
                 username: override-user
                 password: override-secret
+                mailbox_root: Mail
+                mailbox_delimiter: .
                 create_missing_mailboxes: true
                 rules:
                   - name: override rule
-                    mailbox: Alerts
+                    mailbox: "@root/Alerts"
                     criteria:
                       seen: false
                     actions:
                       copy_to:
                         account: shared
-                        mailbox: Shared/Alerts
+                        mailbox: "@root/Shared/Alerts"
             """
         ).strip(),
         encoding="utf-8",
@@ -80,10 +82,12 @@ def test_load_config_merges_includes_and_multiple_files(
     assert [account.name for account in config.accounts] == ["shared", "base", "override"]
     assert config.accounts[0].password == "env-secret"
     assert config.accounts[2].create_missing_mailboxes is True
-    assert config.accounts[2].rules[0].mailbox == "Alerts"
+    assert config.accounts[2].mailbox_root == "Mail"
+    assert config.accounts[2].mailbox_delimiter == "."
+    assert config.accounts[2].rules[0].mailbox == "@root/Alerts"
     assert config.accounts[2].rules[0].actions.copy_to is not None
     assert config.accounts[2].rules[0].actions.copy_to.account == "shared"
-    assert config.accounts[2].rules[0].actions.copy_to.mailbox == "Shared/Alerts"
+    assert config.accounts[2].rules[0].actions.copy_to.mailbox == "@root/Shared/Alerts"
 
 
 def test_load_config_rejects_unknown_cross_account_target(tmp_path: Path) -> None:

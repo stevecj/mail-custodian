@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from email import policy
 from email.message import EmailMessage
@@ -214,6 +215,20 @@ def test_apply_actions_creates_and_updates_mailboxes() -> None:
     assert ("store", ("42", "-FLAGS.SILENT", "$Junk")) in session.connection.uid_calls
 
 
+def test_select_mailbox_resolves_root_mailbox_token() -> None:
+    session = _build_session()
+    session.account = replace(
+        session.account,
+        mailbox_root="Mail",
+        mailbox_delimiter=".",
+    )
+
+    session.select_mailbox("@root/Review/Spam")
+
+    assert session.current_mailbox == "Mail.Review.Spam"
+    assert session.connection.selected_mailbox == "Mail.Review.Spam"
+
+
 def test_copy_to_is_idempotent_without_stamping_headers() -> None:
     session = _build_session()
     message = _build_message(message_id=None)
@@ -273,19 +288,24 @@ def test_move_to_deletes_source_when_duplicate_exists_in_destination() -> None:
 def test_copy_to_other_account_appends_message_on_target_session() -> None:
     source_session = _build_session("source")
     target_session = _build_session("review")
+    target_session.account = replace(
+        target_session.account,
+        mailbox_root="Mail",
+        mailbox_delimiter=".",
+    )
     message = _build_message()
 
     source_session.apply_actions(
         message,
-        Actions(copy_to=ActionTarget(mailbox="Review/Spam", account="review")),
+        Actions(copy_to=ActionTarget(mailbox="@root/Review/Spam", account="review")),
         create_missing_mailboxes=True,
         dry_run=False,
         copy_session=target_session,
         copy_create_missing_mailboxes=True,
     )
 
-    assert target_session.connection.created_mailboxes == {"Review/Spam"}
-    assert target_session.connection.append_calls[0][0] == "Review/Spam"
+    assert target_session.connection.created_mailboxes == {"Mail.Review.Spam"}
+    assert target_session.connection.append_calls[0][0] == "Mail.Review.Spam"
     assert not source_session.connection.uid_calls
 
 

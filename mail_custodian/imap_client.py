@@ -9,7 +9,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from html import unescape
 
-from .models import AccountConfig, ActionResult, Actions, ActionTarget, Criteria, MessageData
+from .models import AccountConfig, ActionResult, Actions, ActionTarget, Criteria, MessageData, resolve_mailbox_name
 
 LOGGER = logging.getLogger(__name__)
 COPY_ID_HEADER = "X-Mail-Custodian-Id"
@@ -46,12 +46,13 @@ class IMAPSession:
 
     def select_mailbox(self, mailbox: str) -> None:
         connection = self._require_connection()
-        if self.current_mailbox == mailbox:
+        resolved_mailbox = resolve_mailbox_name(self.account, mailbox)
+        if self.current_mailbox == resolved_mailbox:
             return
-        status, data = connection.select(mailbox)
+        status, data = connection.select(resolved_mailbox)
         if status != "OK":
-            raise RuntimeError(f"failed to select mailbox '{mailbox}': {data}")
-        self.current_mailbox = mailbox
+            raise RuntimeError(f"failed to select mailbox '{resolved_mailbox}': {data}")
+        self.current_mailbox = resolved_mailbox
 
     def search_uids(self, criteria: Criteria) -> list[str]:
         return self._search_selected_mailbox_uids(self._build_search_terms(criteria))
@@ -79,7 +80,7 @@ class IMAPSession:
 
         return MessageData(
             uid=uid,
-            mailbox=self.current_mailbox or self.account.default_mailbox,
+            mailbox=self.current_mailbox or resolve_mailbox_name(self.account, self.account.default_mailbox),
             sender=email_message.get("From", ""),
             to=email_message.get("To", ""),
             cc=email_message.get("Cc", ""),
@@ -201,43 +202,49 @@ class IMAPSession:
 
         return terms
 
-    def _ensure_target_mailbox(self, mailbox: str, create_missing_mailboxes: bool) -> None:
+    def _ensure_target_mailbox(self, mailbox: str, create_missing_mailboxes: bool) -> str:
         connection = self._require_connection()
-        status, data = connection.list("", mailbox)
+        resolved_mailbox = resolve_mailbox_name(self.account, mailbox)
+        status, data = connection.list("", resolved_mailbox)
         if status == "OK" and any(item for item in data if item):
-            return
+            return resolved_mailbox
         if not create_missing_mailboxes:
-            raise RuntimeError(f"target mailbox does not exist: {mailbox}")
+            raise RuntimeError(f"target mailbox does not exist: {resolved_mailbox}")
 
-        create_status, create_data = connection.create(mailbox)
+        create_status, create_data = connection.create(resolved_mailbox)
         if create_status != "OK":
-            raise RuntimeError(f"failed to create mailbox '{mailbox}': {create_data}")
+            raise RuntimeError(f"failed to create mailbox '{resolved_mailbox}': {create_data}")
+        return resolved_mailbox
 
     def _copy_message(self, message: MessageData, target_mailbox: str, *, create_missing_mailboxes: bool) -> None:
-        self._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
-        if self._mailbox_contains_duplicate(target_mailbox, message):
-            LOGGER.info("skipping copy of UID %s to %s; matching message already exists", message.uid, target_mailbox)
+        resolved_target_mailbox = self._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
+        if self._mailbox_contains_duplicate(resolved_target_mailbox, message):
+            LOGGER.info(
+                "skipping copy of UID %s to %s; matching message already exists",
+                message.uid,
+                resolved_target_mailbox,
+            )
             return
 
-        self._append_message(target_mailbox, message)
+        self._append_message(resolved_target_mailbox, message)
 
     def _move_message(self, message: MessageData, target_mailbox: str, *, create_missing_mailboxes: bool) -> bool:
-        self._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
-        if self._mailbox_contains_duplicate(target_mailbox, message):
+        resolved_target_mailbox = self._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
+        if self._mailbox_contains_duplicate(resolved_target_mailbox, message):
             LOGGER.info(
                 "deleting UID %s from %s; matching message already exists in %s",
                 message.uid,
                 self.current_mailbox,
-                target_mailbox,
+                resolved_target_mailbox,
             )
             self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
             return True
 
         if "MOVE" in self.capabilities:
-            self._uid_command("move", message.uid, target_mailbox)
+            self._uid_command("move", message.uid, resolved_target_mailbox)
             return False
 
-        self._uid_command("copy", message.uid, target_mailbox)
+        self._uid_command("copy", message.uid, resolved_target_mailbox)
         self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
         return True
 
@@ -249,19 +256,19 @@ class IMAPSession:
         target_mailbox: str,
         create_missing_mailboxes: bool,
     ) -> bool:
-        target_session._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
-        if target_session._mailbox_contains_duplicate(target_mailbox, message):
+        resolved_target_mailbox = target_session._ensure_target_mailbox(target_mailbox, create_missing_mailboxes)
+        if target_session._mailbox_contains_duplicate(resolved_target_mailbox, message):
             LOGGER.info(
                 "deleting UID %s from %s; matching message already exists in %s:%s",
                 message.uid,
                 self.current_mailbox,
                 target_session.account.name,
-                target_mailbox,
+                resolved_target_mailbox,
             )
             self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
             return True
 
-        target_session._append_message(target_mailbox, message)
+        target_session._append_message(resolved_target_mailbox, message)
         self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
         return True
 

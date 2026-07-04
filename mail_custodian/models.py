@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 
+ROOT_MAILBOX_TOKEN = "@root"
+
 
 @dataclass(frozen=True)
 class Criteria:
@@ -100,6 +102,8 @@ class AccountConfig:
     port: int = 993
     ssl: bool = True
     timeout: int = 30
+    mailbox_root: str = "INBOX"
+    mailbox_delimiter: str = "/"
     default_mailbox: str = "INBOX"
     create_missing_mailboxes: bool = False
     rules: tuple[Rule, ...] = ()
@@ -144,3 +148,19 @@ def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
 
 def _cutoff(days: int) -> datetime:
     return datetime.now(timezone.utc) - timedelta(days=days)
+
+
+def resolve_mailbox_name(account: AccountConfig, mailbox: str) -> str:
+    if mailbox == ROOT_MAILBOX_TOKEN:
+        return account.mailbox_root
+
+    prefix = f"{ROOT_MAILBOX_TOKEN}/"
+    if not mailbox.startswith(prefix):
+        return mailbox
+
+    suffix = mailbox[len(prefix) :]
+    if not suffix:
+        return account.mailbox_root
+
+    parts = [account.mailbox_root, *suffix.split("/")]
+    return account.mailbox_delimiter.join(parts)

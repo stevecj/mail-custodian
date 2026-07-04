@@ -5,7 +5,7 @@ import logging
 from collections import defaultdict
 
 from .imap_client import IMAPSession
-from .models import AccountConfig, AppConfig, Rule
+from .models import AccountConfig, ActionTarget, Actions, AppConfig, Rule, resolve_mailbox_name
 
 LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class FilterEngine:
         sessions: dict[str, IMAPSession],
         exit_stack: ExitStack,
     ) -> None:
-        grouped_rules = _group_rules_by_mailbox(account.rules)
+        grouped_rules = _group_rules_by_mailbox(account, account.rules)
         session = _get_session(account, sessions=sessions, exit_stack=exit_stack)
         for mailbox, rules in grouped_rules.items():
             session.select_mailbox(mailbox)
@@ -63,7 +63,7 @@ class FilterEngine:
                     )
                     result = session.apply_actions(
                         message,
-                        rule.actions,
+                        _resolve_actions(rule.actions, account=account, accounts_by_name=accounts_by_name),
                         create_missing_mailboxes=account.create_missing_mailboxes,
                         dry_run=self.dry_run,
                         copy_session=_resolve_target_session(
@@ -99,10 +99,10 @@ class FilterEngine:
                 session.expunge()
 
 
-def _group_rules_by_mailbox(rules: tuple[Rule, ...]) -> dict[str, list[Rule]]:
+def _group_rules_by_mailbox(account: AccountConfig, rules: tuple[Rule, ...]) -> dict[str, list[Rule]]:
     grouped: dict[str, list[Rule]] = defaultdict(list)
     for rule in rules:
-        grouped[rule.mailbox].append(rule)
+        grouped[resolve_mailbox_name(account, rule.mailbox)].append(rule)
     return dict(grouped)
 
 
@@ -141,3 +141,37 @@ def _resolve_target_create_missing_mailboxes(
     if target_account_name is None or target_account_name == account.name:
         return None
     return accounts_by_name[target_account_name].create_missing_mailboxes
+
+
+def _resolve_actions(
+    actions: Actions,
+    *,
+    account: AccountConfig,
+    accounts_by_name: dict[str, AccountConfig],
+) -> Actions:
+    return Actions(
+        move_to=_resolve_action_target(actions.move_to, account=account, accounts_by_name=accounts_by_name),
+        copy_to=_resolve_action_target(actions.copy_to, account=account, accounts_by_name=accounts_by_name),
+        mark_read=actions.mark_read,
+        mark_unread=actions.mark_unread,
+        add_flags=actions.add_flags,
+        remove_flags=actions.remove_flags,
+        delete=actions.delete,
+        stop_processing=actions.stop_processing,
+    )
+
+
+def _resolve_action_target(
+    target: ActionTarget | None,
+    *,
+    account: AccountConfig,
+    accounts_by_name: dict[str, AccountConfig],
+) -> ActionTarget | None:
+    if target is None:
+        return None
+
+    target_account = account if target.account is None else accounts_by_name[target.account]
+    return ActionTarget(
+        mailbox=resolve_mailbox_name(target_account, target.mailbox),
+        account=target.account,
+    )
