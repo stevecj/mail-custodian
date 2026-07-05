@@ -23,6 +23,15 @@ class _SharedRuleSpec:
     actions: Actions
 
 
+@dataclass(frozen=True)
+class _SharedRuleGroupSpec:
+    accounts: tuple[str, ...]
+    name: str
+    mailbox: str | None
+    criteria_data: dict[str, Any]
+    rules_data: tuple[dict[str, Any], ...]
+
+
 def load_config(paths: list[str]) -> AppConfig:
     if not paths:
         raise ConfigError("at least one --config path is required")
@@ -82,6 +91,9 @@ def _build_app_config(data: dict[str, Any]) -> AppConfig:
     shared_rules_data = data.get("shared_rules", [])
     if shared_rules_data and not isinstance(shared_rules_data, list):
         raise ConfigError("'shared_rules' must be a list")
+    shared_rule_groups_data = data.get("shared_rule_groups", [])
+    if shared_rule_groups_data and not isinstance(shared_rule_groups_data, list):
+        raise ConfigError("'shared_rule_groups' must be a list")
 
     log_level = data.get("log_level", "INFO")
     if not isinstance(log_level, str):
@@ -92,10 +104,15 @@ def _build_app_config(data: dict[str, Any]) -> AppConfig:
         _build_shared_rule(index, raw_rule)
         for index, raw_rule in enumerate(shared_rules_data, start=1)
     )
+    shared_rule_groups = tuple(
+        _build_shared_rule_group(index, raw_group)
+        for index, raw_group in enumerate(shared_rule_groups_data, start=1)
+    )
     accounts = _apply_shared_rules(accounts, shared_rules)
+    accounts = _apply_shared_rule_groups(accounts, shared_rule_groups)
     _validate_accounts(accounts)
     if not any(account.rules for account in accounts):
-        raise ConfigError("config must define at least one rule across 'accounts' and 'shared_rules'")
+        raise ConfigError("config must define at least one rule across 'accounts', 'shared_rules', and 'shared_rule_groups'")
     return AppConfig(log_level=log_level.upper(), accounts=accounts)
 
 
@@ -119,12 +136,18 @@ def _build_account(index: int, data: Any) -> AccountConfig:
     rules_data = mapping.get("rules", [])
     if not isinstance(rules_data, list):
         raise ConfigError(f"{context}.rules must be a list")
+    groups_data = mapping.get("groups", [])
+    if not isinstance(groups_data, list):
+        raise ConfigError(f"{context}.groups must be a list")
 
     default_mailbox = mapping.get("default_mailbox", "INBOX")
     if not isinstance(default_mailbox, str):
         raise ConfigError(f"{context}.default_mailbox must be a string")
 
-    rules = _build_rule_list(rules_data, default_mailbox, f"{context}.rules")
+    rules = [
+        *_build_rule_list(rules_data, default_mailbox, f"{context}.rules"),
+        *_build_group_rule_list(groups_data, default_mailbox, f"{context}.groups"),
+    ]
 
     return AccountConfig(
         name=_require_string(mapping, "name", context),
@@ -146,7 +169,7 @@ def _build_account(index: int, data: Any) -> AccountConfig:
             f"{context}.create_missing_mailboxes",
             default=False,
         ),
-        rules=rules,
+        rules=tuple(rules),
     )
 
 
@@ -168,6 +191,29 @@ def _build_rule(index: int, data: Any, default_mailbox: str, *, context: str = "
     )
 
 
+def _build_group_rule_list(groups_data: list[Any], default_mailbox: str, context: str) -> tuple[Rule, ...]:
+    rules: list[Rule] = []
+    for group_index, raw_group in enumerate(groups_data, start=1):
+        group_context = f"{context}[{group_index}]"
+        group_mapping = _ensure_mapping(raw_group, group_context)
+        _require_string(group_mapping, "name", group_context)
+        group_mailbox = _optional_string(group_mapping.get("mailbox"), f"{group_context}.mailbox")
+        group_criteria = _ensure_mapping(group_mapping.get("criteria", {}), f"{group_context}.criteria")
+        rules_data = group_mapping.get("rules")
+        if not isinstance(rules_data, list) or not rules_data:
+            raise ConfigError(f"{group_context}.rules must be a non-empty list")
+
+        rules.extend(
+            _build_group_member_rules(
+                rules_data,
+                default_mailbox=group_mailbox or default_mailbox,
+                inherited_criteria=group_criteria,
+                context=f"{group_context}.rules",
+            )
+        )
+    return tuple(rules)
+
+
 def _build_shared_rule(index: int, data: Any) -> _SharedRuleSpec:
     context = f"shared_rules[{index}]"
     mapping = _ensure_mapping(data, context)
@@ -183,6 +229,36 @@ def _build_shared_rule(index: int, data: Any) -> _SharedRuleSpec:
         mailbox=_optional_string(mapping.get("mailbox"), f"{context}.mailbox"),
         criteria=_build_criteria(_ensure_mapping(mapping.get("criteria", {}), f"{context}.criteria")),
         actions=_build_actions(_ensure_mapping(mapping.get("actions", {}), f"{context}.actions"), context),
+    )
+
+
+def _build_shared_rule_group(index: int, data: Any) -> _SharedRuleGroupSpec:
+    context = f"shared_rule_groups[{index}]"
+    mapping = _ensure_mapping(data, context)
+    accounts = _string_list(mapping.get("accounts"), f"{context}.accounts")
+    if not accounts:
+        raise ConfigError(f"{context}.accounts must define at least one account name")
+    if len(set(accounts)) != len(accounts):
+        raise ConfigError(f"{context}.accounts must not contain duplicates")
+
+    _require_string(mapping, "name", context)
+    group_mailbox = _optional_string(mapping.get("mailbox"), f"{context}.mailbox")
+    group_criteria = _ensure_mapping(mapping.get("criteria", {}), f"{context}.criteria")
+    rules_data = mapping.get("rules")
+    if not isinstance(rules_data, list) or not rules_data:
+        raise ConfigError(f"{context}.rules must be a non-empty list")
+
+    validated_rules = tuple(
+        _ensure_mapping(raw_rule, f"{context}.rules[{rule_index}]")
+        for rule_index, raw_rule in enumerate(rules_data, start=1)
+    )
+
+    return _SharedRuleGroupSpec(
+        accounts=accounts,
+        name=_require_string(mapping, "name", context),
+        mailbox=group_mailbox,
+        criteria_data=group_criteria,
+        rules_data=validated_rules,
     )
 
 
@@ -213,6 +289,58 @@ def _apply_shared_rules(
             )
 
     return tuple(replace(account, rules=tuple(expanded_rules[account.name])) for account in accounts)
+
+
+def _apply_shared_rule_groups(
+    accounts: tuple[AccountConfig, ...],
+    shared_rule_groups: tuple[_SharedRuleGroupSpec, ...],
+) -> tuple[AccountConfig, ...]:
+    if not shared_rule_groups:
+        return accounts
+
+    accounts_by_name = {account.name: account for account in accounts}
+    expanded_rules: dict[str, list[Rule]] = {account.name: list(account.rules) for account in accounts}
+
+    for index, shared_group in enumerate(shared_rule_groups, start=1):
+        for account_name in shared_group.accounts:
+            account = accounts_by_name.get(account_name)
+            if account is None:
+                raise ConfigError(
+                    f"shared_rule_groups[{index}].accounts references unknown account '{account_name}'"
+                )
+            expanded_rules[account_name].extend(
+                _build_group_member_rules(
+                    list(shared_group.rules_data),
+                    default_mailbox=shared_group.mailbox or account.default_mailbox,
+                    inherited_criteria=shared_group.criteria_data,
+                    context=f"shared_rule_groups[{index}].rules",
+                )
+            )
+
+    return tuple(replace(account, rules=tuple(expanded_rules[account.name])) for account in accounts)
+
+
+def _build_group_member_rules(
+    rules_data: list[Any],
+    *,
+    default_mailbox: str,
+    inherited_criteria: dict[str, Any],
+    context: str,
+) -> tuple[Rule, ...]:
+    rules: list[Rule] = []
+    for rule_index, raw_rule in enumerate(rules_data, start=1):
+        rule_context = f"{context}[{rule_index}]"
+        rule_mapping = _ensure_mapping(raw_rule, rule_context)
+        merged_criteria = _merge_dicts(inherited_criteria, _ensure_mapping(rule_mapping.get("criteria", {}), f"{rule_context}.criteria"))
+        rules.append(
+            Rule(
+                name=_require_string(rule_mapping, "name", rule_context),
+                mailbox=_string_or_default(rule_mapping.get("mailbox"), default_mailbox, f"{rule_context}.mailbox"),
+                criteria=_build_criteria(merged_criteria),
+                actions=_build_actions(_ensure_mapping(rule_mapping.get("actions", {}), f"{rule_context}.actions"), rule_context),
+            )
+        )
+    return tuple(rules)
 
 
 def _build_criteria(data: dict[str, Any]) -> Criteria:

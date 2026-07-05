@@ -139,6 +139,90 @@ def test_load_config_expands_shared_rules_into_target_accounts(tmp_path: Path) -
     assert [rule.name for rule in config.accounts[1].rules] == ["shared spam quarantine"]
 
 
+def test_load_config_expands_account_groups_with_merged_criteria(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            accounts:
+              - name: personal
+                host: imap.personal.test
+                username: personal-user
+                password: personal-secret
+                groups:
+                  - name: shopping
+                    mailbox: "@root"
+                    criteria:
+                      from:
+                        - store@example.com
+                      new_messages_only: true
+                    rules:
+                      - name: move coupons
+                        criteria:
+                          subject_contains:
+                            - coupon
+                        actions:
+                          move_to: "@root/Coupons"
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config([str(tmp_path / "config.yaml")])
+
+    assert [rule.name for rule in config.accounts[0].rules] == ["move coupons"]
+    rule = config.accounts[0].rules[0]
+    assert rule.mailbox == "@root"
+    assert rule.criteria.new_messages_only is True
+    assert rule.criteria.sender == ("store@example.com",)
+    assert rule.criteria.subject_contains == ("coupon",)
+
+
+def test_load_config_expands_shared_rule_groups_into_target_accounts(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            shared_rule_groups:
+              - name: shopping
+                accounts:
+                  - personal
+                  - work
+                mailbox: "@root"
+                criteria:
+                  from:
+                    - store@example.com
+                rules:
+                  - name: flag receipts
+                    criteria:
+                      subject_contains:
+                        - receipt
+                    actions:
+                      add_flags:
+                        - \\Flagged
+            accounts:
+              - name: personal
+                host: imap.personal.test
+                username: personal-user
+                password: personal-secret
+              - name: work
+                host: imap.work.test
+                username: work-user
+                password: work-secret
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config([str(tmp_path / "config.yaml")])
+
+    for account in config.accounts:
+        assert [rule.name for rule in account.rules] == ["flag receipts"]
+        rule = account.rules[0]
+        assert rule.mailbox == "@root"
+        assert rule.criteria.sender == ("store@example.com",)
+        assert rule.criteria.subject_contains == ("receipt",)
+        assert rule.actions.add_flags == ("\\Flagged",)
+
+
 def test_load_config_rejects_unknown_cross_account_target(tmp_path: Path) -> None:
     (tmp_path / "config.yaml").write_text(
         textwrap.dedent(
@@ -193,3 +277,33 @@ def test_load_config_rejects_unknown_shared_rule_account(tmp_path: Path) -> None
         assert "shared_rules[1].accounts references unknown account 'missing'" in str(exc)
     else:
         raise AssertionError("expected unknown shared rule account to raise an error")
+
+
+def test_load_config_rejects_unknown_shared_rule_group_account(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            shared_rule_groups:
+              - name: shopping
+                accounts:
+                  - missing
+                rules:
+                  - name: flag receipts
+                    actions:
+                      mark_read: true
+            accounts:
+              - name: personal
+                host: imap.personal.test
+                username: personal-user
+                password: personal-secret
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    try:
+        load_config([str(tmp_path / "config.yaml")])
+    except ValueError as exc:
+        assert "shared_rule_groups[1].accounts references unknown account 'missing'" in str(exc)
+    else:
+        raise AssertionError("expected unknown shared rule group account to raise an error")

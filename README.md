@@ -51,6 +51,7 @@ Use `config.example.yaml` as a starting point.
 | `log_level` | string | Default Python logging level, e.g. `INFO` or `DEBUG`. |
 | `includes` | list | Optional list of YAML files to merge before the current file. Paths are relative to the file that declares them. |
 | `shared_rules` | list | Optional reusable rules applied to one or more named accounts. |
+| `shared_rule_groups` | list | Optional reusable rule groups applied to one or more named accounts. |
 | `accounts` | list | One or more IMAP account definitions. |
 
 ### Account keys
@@ -69,6 +70,7 @@ Use `config.example.yaml` as a starting point.
 | `default_mailbox` | string | Mailbox used when a rule omits `mailbox`. |
 | `create_missing_mailboxes` | boolean | Create `move_to`/`copy_to` target mailboxes for this account when missing. |
 | `timeout` | integer | Socket timeout in seconds. |
+| `groups` | list | Optional groups of rules that share mailbox and/or criteria. |
 | `rules` | list | Account-local filtering rules. |
 
 Set either `password` or `password_env`. `password_env` is recommended for cron jobs.
@@ -115,6 +117,57 @@ shared_rules:
 ```
 
 Shared rules are appended to each listed account's local `rules` in the order they appear.
+
+### Rule groups
+
+Use `groups` inside an account when several rules share the same mailbox and/or criteria.
+
+```yaml
+accounts:
+  - name: personal
+    groups:
+      - name: shopping
+        mailbox: "@root"
+        criteria:
+          from:
+            - store-a.example
+            - store-b.example
+        rules:
+          - name: move coupons
+            criteria:
+              subject_contains:
+                - coupon
+            actions:
+              move_to: "@root/Coupons"
+```
+
+Each group member is still a normal rule. The effective rule criteria are built by merging the group's `criteria` with the member rule's `criteria`, and the member rule inherits the group's `mailbox` when it does not set its own.
+
+### Shared rule groups
+
+Use `shared_rule_groups` when you want that same grouping pattern to apply to multiple accounts:
+
+```yaml
+shared_rule_groups:
+  - name: shopping
+    accounts:
+      - personal
+      - work
+    mailbox: "@root"
+    criteria:
+      from:
+        - store.example
+    rules:
+      - name: flag receipts
+        criteria:
+          subject_contains:
+            - receipt
+        actions:
+          add_flags:
+            - \Flagged
+```
+
+`shared_rule_groups` are expanded into each listed account after that account's local `rules` and `groups`.
 
 ### Rule actions
 
@@ -174,7 +227,8 @@ python -m pytest
 - Mailbox checkpoints are only used by rules with `criteria.new_messages_only: true`.
 - Checkpoints use IMAP `UIDVALIDITY` plus the highest processed UID. If `UIDVALIDITY` changes, Mail Custodian rescans checkpointed rules in that mailbox from the beginning.
 - Rules are evaluated mailbox by mailbox in the order they appear in the merged configuration.
-- Shared rules are expanded into each listed account during config loading, after that account's local rules.
+- Shared rules are expanded into each listed account during config loading, after that account's local rules and groups.
+- Shared rule groups are expanded into each listed account during config loading after shared rules.
 - The fallback move implementation expunges after the mailbox pass completes.
 - Cross-account `copy_to` and `move_to` targets refer to configured account `name` values, which must be unique.
 - `copy_to` and duplicate-aware `move_to` use heuristic duplicate detection. They avoid many duplicate messages, including cases where bodies match but attachments or headers differ, but they can still miss matches if mail is rewritten in transit or lacks enough stable metadata to narrow the search reliably.
