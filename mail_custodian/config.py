@@ -230,6 +230,7 @@ def _build_criteria(data: dict[str, Any]) -> Criteria:
 
     return Criteria(
         match=match_mode,
+        new_messages_only=_optional_bool(data.get("new_messages_only"), "criteria.new_messages_only", default=False) or False,
         sender=_string_list(data.get("from"), "criteria.from"),
         to=_string_list(data.get("to"), "criteria.to"),
         cc=_string_list(data.get("cc"), "criteria.cc"),

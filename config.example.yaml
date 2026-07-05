@@ -6,6 +6,7 @@ shared_rules:
       - review
     mailbox: "@root"
     criteria:
+      new_messages_only: true
       match: any
       body_contains:
         - unsubscribe here
@@ -83,9 +84,10 @@ accounts:
     default_mailbox: "@root"
     create_missing_mailboxes: true
     rules:
-      - name: Move store promotions to coupons account
+      - name: Move new store promotions to coupons account
         mailbox: "@root"
         criteria:
+          new_messages_only: true
           match: any
           from:
             - coupons@example-store.com

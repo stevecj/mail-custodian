@@ -126,7 +126,7 @@ def test_engine_routes_cross_account_action_to_target_session(monkeypatch) -> No
                     Rule(
                         name="copy elsewhere",
                         mailbox="@root",
-                        criteria=Criteria(),
+                        criteria=Criteria(new_messages_only=True),
                         actions=Actions(copy_to=ActionTarget(mailbox="@root/Review/Spam", account="review")),
                     ),
                 ),
@@ -180,7 +180,7 @@ def test_engine_persists_mailbox_checkpoint(monkeypatch, tmp_path: Path) -> None
                     Rule(
                         name="local rule",
                         mailbox="INBOX",
-                        criteria=Criteria(),
+                        criteria=Criteria(new_messages_only=True),
                         actions=Actions(mark_read=True),
                     ),
                 ),
@@ -195,3 +195,36 @@ def test_engine_persists_mailbox_checkpoint(monkeypatch, tmp_path: Path) -> None
     assert source_session.search_uids_calls == [6]
     reloaded = MailboxStateStore(tmp_path / "checkpoints.json")
     assert reloaded.get("source", "INBOX") == MailboxCheckpoint(uidvalidity=999, last_uid=7)
+
+
+def test_engine_skips_checkpointing_for_non_opt_in_rules(monkeypatch, tmp_path: Path) -> None:
+    FakeSession.instances = {}
+    monkeypatch.setattr("mail_custodian.engine.IMAPSession", FakeSession)
+    store = MailboxStateStore(tmp_path / "checkpoints.json")
+
+    config = AppConfig(
+        log_level="INFO",
+        accounts=(
+            AccountConfig(
+                name="source",
+                host="imap.source.test",
+                username="source-user",
+                password="source-secret",
+                rules=(
+                    Rule(
+                        name="local rule",
+                        mailbox="INBOX",
+                        criteria=Criteria(),
+                        actions=Actions(mark_read=True),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert FilterEngine(config, checkpoint_store=store).run() == 0
+
+    source_session = FakeSession.instances["source"]
+    assert source_session.list_uids_calls == []
+    assert source_session.search_uids_calls == [None]
+    assert MailboxStateStore(tmp_path / "checkpoints.json").get("source", "INBOX") is None

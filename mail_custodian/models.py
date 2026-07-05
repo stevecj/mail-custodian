@@ -10,6 +10,7 @@ ROOT_MAILBOX_TOKEN = "@root"
 @dataclass(frozen=True)
 class Criteria:
     match: str = "all"
+    new_messages_only: bool = False
     sender: tuple[str, ...] = ()
     to: tuple[str, ...] = ()
     cc: tuple[str, ...] = ()

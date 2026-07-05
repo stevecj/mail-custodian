@@ -114,6 +114,8 @@ def test_load_config_expands_shared_rules_into_target_accounts(tmp_path: Path) -
                 mailbox_delimiter: .
                 rules:
                   - name: local cleanup
+                    criteria:
+                      new_messages_only: true
                     actions:
                       mark_read: true
               - name: work
@@ -130,6 +132,7 @@ def test_load_config_expands_shared_rules_into_target_accounts(tmp_path: Path) -
     config = load_config([str(tmp_path / "config.yaml")])
 
     assert [rule.name for rule in config.accounts[0].rules] == ["local cleanup", "shared spam quarantine"]
+    assert config.accounts[0].rules[0].criteria.new_messages_only is True
     assert config.accounts[0].rules[1].mailbox == "@root"
     assert config.accounts[0].rules[1].actions.copy_to is not None
     assert config.accounts[0].rules[1].actions.copy_to.mailbox == "@root/Spam"

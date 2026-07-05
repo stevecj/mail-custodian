@@ -83,6 +83,7 @@ All configured criteria are combined with `AND` by default. Set `match: any` to 
 | `subject_contains` | Case-insensitive substring match against the subject. |
 | `body_contains` | Case-insensitive substring match against decoded body text. |
 | `header_contains` | Mapping of header name to string or list of strings to search. |
+| `new_messages_only` | When `true`, only evaluate messages with UIDs newer than the last checkpoint for that mailbox. |
 | `seen`, `flagged`, `answered` | Match IMAP flags. |
 | `has_attachments` | Match messages with or without attachments. |
 | `older_than_days`, `younger_than_days` | Compare message age using IMAP `INTERNALDATE`. |
@@ -146,14 +147,14 @@ mail-custodian --config config.yaml --dry-run --verbose
 
 ## Checkpoint state
 
-Mail Custodian keeps a per-account, per-mailbox checkpoint so each run only evaluates messages with UIDs newer than the last successful scan for that mailbox.
+Mail Custodian keeps a per-account, per-mailbox checkpoint for rules that set `criteria.new_messages_only: true`.
 
 The checkpoint file lives at:
 
 - `$XDG_STATE_HOME/mail-custodian/checkpoints.json` when `XDG_STATE_HOME` is set
 - `~/.local/state/mail-custodian/checkpoints.json` otherwise
 
-Changed or newly added rules do **not** revisit older messages automatically. Delete the checkpoint file to force a full rescan.
+For those opt-in rules, changed or newly added rules do **not** revisit older messages automatically. Delete the checkpoint file to force a full rescan.
 
 ## Tests
 
@@ -170,7 +171,8 @@ python -m pytest
 ## Notes
 
 - The program fetches matching candidates directly from IMAP and never keeps its own message store.
-- Mailbox checkpoints use IMAP `UIDVALIDITY` plus the highest processed UID. If `UIDVALIDITY` changes, Mail Custodian rescans that mailbox from the beginning.
+- Mailbox checkpoints are only used by rules with `criteria.new_messages_only: true`.
+- Checkpoints use IMAP `UIDVALIDITY` plus the highest processed UID. If `UIDVALIDITY` changes, Mail Custodian rescans checkpointed rules in that mailbox from the beginning.
 - Rules are evaluated mailbox by mailbox in the order they appear in the merged configuration.
 - Shared rules are expanded into each listed account during config loading, after that account's local rules.
 - The fallback move implementation expunges after the mailbox pass completes.
