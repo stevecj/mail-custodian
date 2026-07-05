@@ -6,6 +6,7 @@ from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 
+import mail_custodian.imap_client
 from mail_custodian.imap_client import COPY_ID_HEADER, IMAPSession
 from mail_custodian.models import AccountConfig, Actions, ActionTarget, Criteria, MessageData
 
@@ -264,6 +265,26 @@ def test_select_mailbox_resolves_root_mailbox_token() -> None:
 
     assert session.current_mailbox == "Mail.Review.Spam"
     assert session.connection.selected_mailbox == "Mail.Review.Spam"
+
+
+def test_apply_actions_forwards_message(monkeypatch) -> None:
+    session = _build_session()
+    message = _build_message()
+    forwarded: list[tuple[str, tuple[str, ...], MessageData]] = []
+
+    def fake_forward(account_username: str, recipients: tuple[str, ...], forwarded_message: MessageData) -> None:
+        forwarded.append((account_username, recipients, forwarded_message))
+
+    monkeypatch.setattr(mail_custodian.imap_client, "forward_message", fake_forward)
+
+    session.apply_actions(
+        message,
+        Actions(forward_to=("alerts@example.net", "audit@example.net")),
+        create_missing_mailboxes=True,
+        dry_run=False,
+    )
+
+    assert forwarded == [("user", ("alerts@example.net", "audit@example.net"), message)]
 
 
 def test_copy_to_is_idempotent_without_stamping_headers() -> None:

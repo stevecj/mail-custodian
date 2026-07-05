@@ -9,6 +9,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from html import unescape
 
+from .mailer import forward_message
 from .models import AccountConfig, ActionResult, Actions, ActionTarget, Criteria, MessageData, resolve_mailbox_name
 
 LOGGER = logging.getLogger(__name__)
@@ -130,11 +131,12 @@ class IMAPSession:
 
         if dry_run:
             LOGGER.info(
-                "dry-run UID %s in %s: copy_to=%s move_to=%s mark_read=%s mark_unread=%s add_flags=%s remove_flags=%s delete=%s",
+                "dry-run UID %s in %s: copy_to=%s move_to=%s forward_to=%s mark_read=%s mark_unread=%s add_flags=%s remove_flags=%s delete=%s",
                 uid,
                 self.current_mailbox,
                 _format_action_target(actions.copy_to),
                 _format_action_target(actions.move_to),
+                list(actions.forward_to),
                 actions.mark_read,
                 actions.mark_unread,
                 list(actions.add_flags),
@@ -154,6 +156,8 @@ class IMAPSession:
                 if copy_session is self
                 else bool(copy_create_missing_mailboxes),
             )
+        if actions.forward_to:
+            forward_message(self.account.username, actions.forward_to, message)
 
         if actions.move_to:
             if move_session is self:

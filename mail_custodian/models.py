@@ -78,6 +78,7 @@ class ActionTarget:
 class Actions:
     move_to: ActionTarget | None = None
     copy_to: ActionTarget | None = None
+    forward_to: tuple[str, ...] = ()
     mark_read: bool = False
     mark_unread: bool = False
     add_flags: tuple[str, ...] = ()

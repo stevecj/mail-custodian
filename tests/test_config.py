@@ -70,6 +70,8 @@ def test_load_config_merges_includes_and_multiple_files(
                       copy_to:
                         account: shared
                         mailbox: "@root/Shared/Alerts"
+                      forward_to:
+                        - notify@example.net
             """
         ).strip(),
         encoding="utf-8",
@@ -88,6 +90,7 @@ def test_load_config_merges_includes_and_multiple_files(
     assert config.accounts[2].rules[0].actions.copy_to is not None
     assert config.accounts[2].rules[0].actions.copy_to.account == "shared"
     assert config.accounts[2].rules[0].actions.copy_to.mailbox == "@root/Shared/Alerts"
+    assert config.accounts[2].rules[0].actions.forward_to == ("notify@example.net",)
 
 
 def test_load_config_expands_shared_rules_into_target_accounts(tmp_path: Path) -> None:

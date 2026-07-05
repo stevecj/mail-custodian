@@ -407,6 +407,7 @@ def _build_actions(data: dict[str, Any], context: str) -> Actions:
     actions = Actions(
         move_to=_build_action_target(data.get("move_to"), f"{context}.actions.move_to"),
         copy_to=_build_action_target(data.get("copy_to"), f"{context}.actions.copy_to"),
+        forward_to=_string_list(data.get("forward_to"), f"{context}.actions.forward_to"),
         mark_read=mark_read,
         mark_unread=mark_unread,
         add_flags=_string_list(data.get("add_flags"), f"{context}.actions.add_flags"),
@@ -423,6 +424,7 @@ def _build_actions(data: dict[str, Any], context: str) -> Actions:
         (
             actions.move_to,
             actions.copy_to,
+            actions.forward_to,
             actions.mark_read,
             actions.mark_unread,
             actions.add_flags,
