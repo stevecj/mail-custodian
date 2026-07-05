@@ -18,6 +18,7 @@ then this warning will be removed.
 - YAML configuration with support for `includes`, repeated `--config` arguments, and a default config path at `~/.config/mail-custodian.yaml`
 - Rule criteria similar to common mail client filters
 - Cron-safe CLI with `--dry-run` mode for safe rollout
+- `--version` for quick CLI/package version checks
 - No message database; messages remain on the IMAP server
 
 ## Install
@@ -203,6 +204,10 @@ Dry run:
 
 ```bash
 mail-custodian --config config.yaml --dry-run --verbose
+```
+
+```bash
+mail-custodian --version
 ```
 
 ## Checkpoint state

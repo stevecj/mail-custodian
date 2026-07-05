@@ -5,6 +5,7 @@ import logging
 import sys
 from pathlib import Path
 
+from . import __version__
 from .config import ConfigError, find_config_warnings, load_config
 from .engine import FilterEngine
 from .state import StateError
@@ -39,8 +40,15 @@ def main() -> int:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
+        add_help=False,
         prog="mail-custodian",
         description="Apply YAML-defined IMAP filtering rules from cron or other schedulers.",
+    )
+    parser.add_argument(
+        "-h",
+        "--help",
+        action="help",
+        help="Show this help message and exit.",
     )
     parser.add_argument(
         "--config",
@@ -60,6 +68,12 @@ def _parse_args() -> argparse.Namespace:
         "--verbose",
         action="store_true",
         help="Enable debug logging.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        help="Show the program version and exit.",
+        version=f"%(prog)s {__version__}",
     )
     args = parser.parse_args()
     if args.config and args.config[0] == DEFAULT_CONFIG_PATH and len(args.config) > 1:
