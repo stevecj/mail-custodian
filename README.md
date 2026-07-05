@@ -1,6 +1,10 @@
 # Mail Custodian
 
-`mail-custodian` is a cron-friendly IMAP filtering application. It reads one or more YAML files, connects directly to IMAP mailboxes, evaluates rules against live messages, and applies actions like copy, move, flag, mark read/unread, or delete. It does not store mail locally and does not provide an interactive UI.
+`mail-custodian` is a cron-friendly IMAP filtering application. It reads
+one or more YAML files, connects directly to IMAP mailboxes, evaluates
+rules against live messages, and applies actions like copy, move, flag,
+mark read/unread, or delete. It does not store mail locally and does not
+provide an interactive UI.
 
 ## Vibed Code Warning
 
@@ -14,12 +18,13 @@ then this warning will be removed.
 
 ## Features
 
-- IMAP-only operation using Python's standard `imaplib`
-- YAML configuration with support for `includes`, repeated `--config` arguments, and a default config path at `~/.config/mail-custodian.yaml`
-- Rule criteria similar to common mail client filters
-- Cron-safe CLI with `--dry-run` mode for safe rollout
-- `--version` for quick CLI/package version checks
-- No message database; messages remain on the IMAP server
+* IMAP-only operation using Python's standard `imaplib`
+* YAML configuration with support for `includes` , repeated `--config`
+  arguments, and a default config path at `~/.config/mail-custodian.yaml`
+* Rule criteria similar to common mail client filters
+* Cron-safe CLI with `--dry-run` mode for safe rollout
+* `--version` for quick CLI/package version checks
+* No message database; messages remain on the IMAP server
 
 ## Install
 
@@ -43,64 +48,73 @@ pip install -e '.[test]'
 
 ## Configuration
 
-Use `config.example.yaml` as a starting point. If you do not pass `--config`, Mail Custodian loads `~/.config/mail-custodian.yaml`.
+Use `config.example.yaml` as a starting point. If you do not pass
+`--config` , Mail Custodian loads `~/.config/mail-custodian.yaml` .
 
 ### Top-level keys
 
-| Key | Type | Meaning |
-| --- | --- | --- |
-| `log_level` | string | Default Python logging level, e.g. `INFO` or `DEBUG`. |
-| `includes` | list | Optional list of YAML files to merge before the current file. Paths are relative to the file that declares them. |
-| `shared_rules` | list | Optional reusable rules applied to one or more named accounts. |
-| `shared_rule_groups` | list | Optional reusable rule groups applied to one or more named accounts. |
-| `accounts` | list | One or more IMAP account definitions. |
+| Key                  | Type   | Meaning                                                                                                          |
+|:---------------------|:-------|:-----------------------------------------------------------------------------------------------------------------|
+| `log_level`          | string | Default Python logging level, e.g. `INFO` or `DEBUG`.                                                            |
+| `includes`           | list   | Optional list of YAML files to merge before the current file. Paths are relative to the file that declares them. |
+| `shared_rules`       | list   | Optional reusable rules applied to one or more named accounts.                                                   |
+| `shared_rule_groups` | list   | Optional reusable rule groups applied to one or more named accounts.                                             |
+| `accounts`           | list   | One or more IMAP account definitions.                                                                            |
 
 ### Account keys
 
-| Key | Type | Meaning |
-| --- | --- | --- |
-| `name` | string | Label used in logs. |
-| `host` | string | IMAP server hostname. |
-| `port` | integer | IMAP server port, default `993`. |
-| `ssl` | boolean | Use IMAPS when `true`, plain IMAP when `false`. |
-| `username` | string | IMAP login user. |
-| `password` | string | IMAP password. |
-| `password_env` | string | Environment variable name containing the password. |
-| `mailbox_root` | string | Mailbox name that `@root` resolves to for this account. Defaults to `INBOX`. |
-| `mailbox_delimiter` | string | Separator used when expanding `@root/...` paths for this account. Defaults to `/`. |
-| `default_mailbox` | string | Mailbox used when a rule omits `mailbox`. |
-| `create_missing_mailboxes` | boolean | Create `move_to`/`copy_to` target mailboxes for this account when missing. |
-| `timeout` | integer | Socket timeout in seconds. |
-| `groups` | list | Optional groups of rules that share mailbox and/or criteria. |
-| `rules` | list | Account-local filtering rules. |
+| Key                        | Type    | Meaning                                                                            |
+|:---------------------------|:--------|:-----------------------------------------------------------------------------------|
+| `name`                     | string  | Label used in logs.                                                                |
+| `host`                     | string  | IMAP server hostname.                                                              |
+| `port`                     | integer | IMAP server port, default `993`.                                                   |
+| `ssl`                      | boolean | Use IMAPS when `true`, plain IMAP when `false`.                                    |
+| `username`                 | string  | IMAP login user.                                                                   |
+| `password`                 | string  | IMAP password.                                                                     |
+| `password_env`             | string  | Environment variable name containing the password.                                 |
+| `mailbox_root`             | string  | Mailbox name that `@root` resolves to for this account. Defaults to `INBOX`.       |
+| `mailbox_delimiter`        | string  | Separator used when expanding `@root/...` paths for this account. Defaults to `/`. |
+| `default_mailbox`          | string  | Mailbox used when a rule omits `mailbox`.                                          |
+| `create_missing_mailboxes` | boolean | Create `move_to`/`copy_to` target mailboxes for this account when missing.         |
+| `timeout`                  | integer | Socket timeout in seconds.                                                         |
+| `groups`                   | list    | Optional groups of rules that share mailbox and/or criteria.                       |
+| `rules`                    | list    | Account-local filtering rules.                                                     |
 
-Set either `password` or `password_env`. `password_env` is recommended for cron jobs.
+Set either `password` or `password_env` . `password_env` is recommended for
+cron jobs.
 
 ### Rule criteria
 
-All configured criteria are combined with `AND` by default. Set `match: any` to use `OR`.
+All configured criteria are combined with `AND` by default. Set
+`match: any` to use `OR` .
 
-| Key | Meaning |
-| --- | --- |
-| `from`, `to`, `cc` | Case-insensitive substring match against the address headers. |
-| `subject_contains` | Case-insensitive substring match against the subject. |
-| `body_contains` | Case-insensitive substring match against decoded body text. |
-| `header_contains` | Mapping of header name to string or list of strings to search. |
-| `new_messages_only` | When `true`, only evaluate messages with UIDs newer than the last checkpoint for that mailbox. |
-| `seen`, `flagged`, `answered` | Match IMAP flags. |
-| `has_attachments` | Match messages with or without attachments. |
-| `older_than_days`, `younger_than_days` | Compare message age using IMAP `INTERNALDATE`. |
-| `size_larger_than`, `size_smaller_than` | Compare RFC822 message size in bytes. |
+| Key                                     | Meaning                                                                                        |
+|:----------------------------------------|:-----------------------------------------------------------------------------------------------|
+| `from`, `to`, `cc`                      | Case-insensitive substring match against the address headers.                                  |
+| `subject_contains`                      | Case-insensitive substring match against the subject.                                          |
+| `body_contains`                         | Case-insensitive substring match against decoded body text.                                    |
+| `header_contains`                       | Mapping of header name to string or list of strings to search.                                 |
+| `new_messages_only`                     | When `true`, only evaluate messages with UIDs newer than the last checkpoint for that mailbox. |
+| `seen`, `flagged`, `answered`           | Match IMAP flags.                                                                              |
+| `has_attachments`                       | Match messages with or without attachments.                                                    |
+| `older_than_days`, `younger_than_days`  | Compare message age using IMAP `INTERNALDATE`.                                                 |
+| `size_larger_than`, `size_smaller_than` | Compare RFC822 message size in bytes.                                                          |
 
 If a rule has no criteria, it matches every message in its mailbox.
 
-Use `@root` to refer to the configured mailbox root, and `@root/...` to build child paths with the account's `mailbox_delimiter`. Quote these values in YAML because `@` cannot start an unquoted scalar. For example, `"@root/Archive/Newsletters"` resolves to `INBOX.Archive.Newsletters` when `mailbox_root: INBOX` and `mailbox_delimiter: .`.
+Use `@root` to refer to the configured mailbox root, and `@root/...` to
+build child paths with the account's `mailbox_delimiter` . Quote these
+values in YAML because `@` cannot start an unquoted scalar. For example,
+`"@root/Archive/Newsletters"` resolves to `INBOX.Archive.Newsletters` when
+`mailbox_root: INBOX` and `mailbox_delimiter: .` .
 
 ### Shared rules
 
-Use `shared_rules` for rules you want to define once and apply to multiple accounts.
+Use `shared_rules` for rules you want to define once and apply to multiple
+accounts.
 
-Each shared rule uses the same rule shape as an account-local rule, plus an `accounts` list naming the target accounts:
+Each shared rule uses the same rule shape as an account-local rule, plus an
+`accounts` list naming the target accounts:
 
 ```yaml
 shared_rules:
@@ -117,11 +131,13 @@ shared_rules:
         mailbox: "@root/Spam"
 ```
 
-Shared rules are appended to each listed account's local `rules` in the order they appear.
+Shared rules are appended to each listed account's local `rules` in the
+order they appear.
 
 ### Rule groups
 
-Use `groups` inside an account when several rules share the same mailbox and/or criteria.
+Use `groups` inside an account when several rules share the same mailbox
+and/or criteria.
 
 ```yaml
 accounts:
@@ -142,11 +158,16 @@ accounts:
               move_to: "@root/Coupons"
 ```
 
-Each group member is still a normal rule. The effective rule criteria are built by merging the group's `criteria` with the member rule's `criteria`, the member rule inherits the group's `mailbox` when it does not set its own, and the expanded rule name gets a ` (<group name>)` suffix for clearer logging.
+Each group member is still a normal rule. The effective rule criteria are
+built by merging the group's `criteria` with the member rule's `criteria` ,
+the member rule inherits the group's `mailbox` when it does not set its
+own, and the expanded rule name gets a ` (<group name>)` suffix for clearer
+logging.
 
 ### Shared rule groups
 
-Use `shared_rule_groups` when you want that same grouping pattern to apply to multiple accounts:
+Use `shared_rule_groups` when you want that same grouping pattern to apply
+to multiple accounts:
 
 ```yaml
 shared_rule_groups:
@@ -168,19 +189,21 @@ shared_rule_groups:
             - \Flagged
 ```
 
-`shared_rule_groups` are expanded into each listed account after that account's local `rules` and `groups`, and their member rule names also receive the ` (<group name>)` suffix.
+`shared_rule_groups` are expanded into each listed account after that
+account's local `rules` and `groups` , and their member rule names also
+receive the ` (<group name>)` suffix.
 
 ### Rule actions
 
-| Key | Meaning |
-| --- | --- |
-| `move_to` | Move matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to move into a different configured account. Mailbox values also accept `@root` and `@root/...`, resolved against the destination account. Before moving, Mail Custodian checks the destination for a likely duplicate using the same heuristic as `copy_to`; if one is found, it deletes the source message instead of creating another copy. Same-account moves use IMAP `MOVE` when supported, otherwise `COPY` + `\Deleted`; cross-account moves append to the destination account and then delete the source. |
-| `copy_to` | Copy matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to copy into a different configured account. Mailbox values also accept `@root` and `@root/...`, resolved against the destination account. Copies are best-effort idempotent: Mail Custodian searches for likely matches by stable headers, then compares the full message content before deciding whether to skip a duplicate copy. |
-| `forward_to` | Forward matching messages to one or more recipient addresses using a local sendmail-compatible binary from `PATH`. Mail Custodian forwards the original message as an attached `.eml` file, so SMTP settings stay outside this configuration. |
-| `mark_read` / `mark_unread` | Add or remove the `\Seen` flag. |
-| `add_flags` / `remove_flags` | Add or remove one or more IMAP flags. |
-| `delete` | Mark the message `\Deleted` and expunge it at the end of the mailbox pass. |
-| `stop_processing` | Stop later rules from touching the same message in the same run. |
+| Key                          | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+|:-----------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `move_to`                    | Move matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to move into a different configured account. Mailbox values also accept `@root` and `@root/...`, resolved against the destination account. Before moving, Mail Custodian checks the destination for a likely duplicate using the same heuristic as `copy_to`; if one is found, it deletes the source message instead of creating another copy. Same-account moves use IMAP `MOVE` when supported, otherwise `COPY` + `\Deleted`; cross-account moves append to the destination account and then delete the source. |
+| `copy_to`                    | Copy matching messages to another mailbox. Set it either to a mailbox string or to `{account, mailbox}` to copy into a different configured account. Mailbox values also accept `@root` and `@root/...`, resolved against the destination account. Copies are best-effort idempotent: Mail Custodian searches for likely matches by stable headers, then compares the full message content before deciding whether to skip a duplicate copy.                                                                                                                                                                               |
+| `forward_to`                 | Forward matching messages to one or more recipient addresses using a local sendmail-compatible binary from `PATH`. Mail Custodian forwards the original message as an attached `.eml` file, so SMTP settings stay outside this configuration.                                                                                                                                                                                                                                                                                                                                                                              |
+| `mark_read` / `mark_unread`  | Add or remove the `\Seen` flag.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `add_flags` / `remove_flags` | Add or remove one or more IMAP flags.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `delete`                     | Mark the message `\Deleted` and expunge it at the end of the mailbox pass.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `stop_processing`            | Stop later rules from touching the same message in the same run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ## Running
 
@@ -188,7 +211,8 @@ shared_rule_groups:
 mail-custodian
 ```
 
-That uses `~/.config/mail-custodian.yaml` by default. To choose a different file:
+That uses `~/.config/mail-custodian.yaml` by default. To choose a different
+file:
 
 ```bash
 mail-custodian --config config.yaml
@@ -212,14 +236,18 @@ mail-custodian --version
 
 ## Checkpoint state
 
-Mail Custodian keeps a per-account, per-mailbox checkpoint for rules that set `criteria.new_messages_only: true`.
+Mail Custodian keeps a per-account, per-mailbox checkpoint for rules that
+set `criteria.new_messages_only: true` .
 
 The checkpoint file lives at:
 
-- `$XDG_STATE_HOME/mail-custodian/checkpoints.json` when `XDG_STATE_HOME` is set
-- `~/.local/state/mail-custodian/checkpoints.json` otherwise
+* `$XDG_STATE_HOME/mail-custodian/checkpoints.json` when `XDG_STATE_HOME`
+  is set
+* `~/.local/state/mail-custodian/checkpoints.json` otherwise
 
-For those opt-in rules, changed or newly added rules do **not** revisit older messages automatically. Delete the checkpoint file to force a full rescan.
+For those opt-in rules, changed or newly added rules do __not__ revisit
+older messages automatically. Delete the checkpoint file to force a full
+rescan.
 
 ## Tests
 
@@ -235,13 +263,28 @@ python -m pytest
 
 ## Notes
 
-- The program fetches matching candidates directly from IMAP and never keeps its own message store.
-- Mailbox checkpoints are only used by rules with `criteria.new_messages_only: true`.
-- Checkpoints use IMAP `UIDVALIDITY` plus the highest processed UID. If `UIDVALIDITY` changes, Mail Custodian rescans checkpointed rules in that mailbox from the beginning.
-- Rules are evaluated mailbox by mailbox in the order they appear in the merged configuration.
-- Shared rules are expanded into each listed account during config loading, after that account's local rules and groups.
-- Shared rule groups are expanded into each listed account during config loading after shared rules.
-- Startup warnings highlight duplicate rule names within an account and rules that are likely to scan every undeleted message in a mailbox.
-- The fallback move implementation expunges after the mailbox pass completes.
-- Cross-account `copy_to` and `move_to` targets refer to configured account `name` values, which must be unique.
-- `copy_to` and duplicate-aware `move_to` use heuristic duplicate detection. They avoid many duplicate messages, including cases where bodies match but attachments or headers differ, but they can still miss matches if mail is rewritten in transit or lacks enough stable metadata to narrow the search reliably.
+* The program fetches matching candidates directly from IMAP and never
+  keeps its own message store.
+* Mailbox checkpoints are only used by rules with
+  `criteria.new_messages_only: true` .
+* Checkpoints use IMAP `UIDVALIDITY` plus the highest processed UID. If
+  `UIDVALIDITY` changes, Mail Custodian rescans checkpointed rules in that
+  mailbox from the beginning.
+* Rules are evaluated mailbox by mailbox in the order they appear in the
+  merged configuration.
+* Shared rules are expanded into each listed account during config loading,
+  after that account's local rules and groups.
+* Shared rule groups are expanded into each listed account during config
+  loading after shared rules.
+* Startup warnings highlight duplicate rule names within an account and
+  rules that are likely to scan every undeleted message in a mailbox.
+* The fallback move implementation expunges after the mailbox pass
+  completes.
+* Cross-account `copy_to` and `move_to` targets refer to configured account
+  `name` values, which must be unique.
+* `copy_to` and duplicate-aware `move_to` use heuristic duplicate
+  detection. They avoid many duplicate messages, including cases where
+  bodies match but attachments or headers differ, but they can still miss
+  matches if mail is rewritten in transit or lacks enough stable metadata
+  to narrow the search reliably.
+
