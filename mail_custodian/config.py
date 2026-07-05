@@ -206,6 +206,7 @@ def _build_group_rule_list(groups_data: list[Any], default_mailbox: str, context
         rules.extend(
             _build_group_member_rules(
                 rules_data,
+                group_name=_require_string(group_mapping, "name", group_context),
                 default_mailbox=group_mailbox or default_mailbox,
                 inherited_criteria=group_criteria,
                 context=f"{group_context}.rules",
@@ -311,6 +312,7 @@ def _apply_shared_rule_groups(
             expanded_rules[account_name].extend(
                 _build_group_member_rules(
                     list(shared_group.rules_data),
+                    group_name=shared_group.name,
                     default_mailbox=shared_group.mailbox or account.default_mailbox,
                     inherited_criteria=shared_group.criteria_data,
                     context=f"shared_rule_groups[{index}].rules",
@@ -323,6 +325,7 @@ def _apply_shared_rule_groups(
 def _build_group_member_rules(
     rules_data: list[Any],
     *,
+    group_name: str,
     default_mailbox: str,
     inherited_criteria: dict[str, Any],
     context: str,
@@ -334,7 +337,7 @@ def _build_group_member_rules(
         merged_criteria = _merge_dicts(inherited_criteria, _ensure_mapping(rule_mapping.get("criteria", {}), f"{rule_context}.criteria"))
         rules.append(
             Rule(
-                name=_require_string(rule_mapping, "name", rule_context),
+                name=f"{_require_string(rule_mapping, 'name', rule_context)} ({group_name})",
                 mailbox=_string_or_default(rule_mapping.get("mailbox"), default_mailbox, f"{rule_context}.mailbox"),
                 criteria=_build_criteria(merged_criteria),
                 actions=_build_actions(_ensure_mapping(rule_mapping.get("actions", {}), f"{rule_context}.actions"), rule_context),

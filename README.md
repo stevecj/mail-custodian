@@ -141,7 +141,7 @@ accounts:
               move_to: "@root/Coupons"
 ```
 
-Each group member is still a normal rule. The effective rule criteria are built by merging the group's `criteria` with the member rule's `criteria`, and the member rule inherits the group's `mailbox` when it does not set its own.
+Each group member is still a normal rule. The effective rule criteria are built by merging the group's `criteria` with the member rule's `criteria`, the member rule inherits the group's `mailbox` when it does not set its own, and the expanded rule name gets a ` (<group name>)` suffix for clearer logging.
 
 ### Shared rule groups
 
@@ -167,7 +167,7 @@ shared_rule_groups:
             - \Flagged
 ```
 
-`shared_rule_groups` are expanded into each listed account after that account's local `rules` and `groups`.
+`shared_rule_groups` are expanded into each listed account after that account's local `rules` and `groups`, and their member rule names also receive the ` (<group name>)` suffix.
 
 ### Rule actions
 

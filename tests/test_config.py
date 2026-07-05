@@ -169,7 +169,7 @@ def test_load_config_expands_account_groups_with_merged_criteria(tmp_path: Path)
 
     config = load_config([str(tmp_path / "config.yaml")])
 
-    assert [rule.name for rule in config.accounts[0].rules] == ["move coupons"]
+    assert [rule.name for rule in config.accounts[0].rules] == ["move coupons (shopping)"]
     rule = config.accounts[0].rules[0]
     assert rule.mailbox == "@root"
     assert rule.criteria.new_messages_only is True
@@ -215,7 +215,7 @@ def test_load_config_expands_shared_rule_groups_into_target_accounts(tmp_path: P
     config = load_config([str(tmp_path / "config.yaml")])
 
     for account in config.accounts:
-        assert [rule.name for rule in account.rules] == ["flag receipts"]
+        assert [rule.name for rule in account.rules] == ["flag receipts (shopping)"]
         rule = account.rules[0]
         assert rule.mailbox == "@root"
         assert rule.criteria.sender == ("store@example.com",)
