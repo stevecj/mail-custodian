@@ -71,3 +71,29 @@ accounts:
           seen: true
         actions:
           mark_unread: true
+
+  - name: shopping
+    host: imap.shopping.example.com
+    port: 993
+    ssl: true
+    username: steve-shopping@example.com
+    password_env: SHOPPING_IMAP_PASSWORD
+    mailbox_root: INBOX
+    mailbox_delimiter: /
+    default_mailbox: "@root"
+    create_missing_mailboxes: true
+    rules:
+      - name: Move store promotions to coupons account
+        mailbox: "@root"
+        criteria:
+          match: any
+          from:
+            - coupons@example-store.com
+            - deals@example-shop.com
+          subject_contains:
+            - coupon
+            - promo code
+        actions:
+          move_to:
+            account: review
+            mailbox: "@root/Coupons"
