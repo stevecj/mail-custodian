@@ -4,7 +4,7 @@ import argparse
 import logging
 import sys
 
-from .config import ConfigError, load_config
+from .config import ConfigError, find_config_warnings, load_config
 from .engine import FilterEngine
 from .state import StateError
 
@@ -22,6 +22,9 @@ def main() -> int:
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    logger = logging.getLogger(__name__)
+    for warning in find_config_warnings(config):
+        logger.warning("%s", warning)
 
     try:
         engine = FilterEngine(config, dry_run=args.dry_run)

@@ -229,6 +229,7 @@ python -m pytest
 - Rules are evaluated mailbox by mailbox in the order they appear in the merged configuration.
 - Shared rules are expanded into each listed account during config loading, after that account's local rules and groups.
 - Shared rule groups are expanded into each listed account during config loading after shared rules.
+- Startup warnings highlight duplicate rule names within an account and rules that are likely to scan every undeleted message in a mailbox.
 - The fallback move implementation expunges after the mailbox pass completes.
 - Cross-account `copy_to` and `move_to` targets refer to configured account `name` values, which must be unique.
 - `copy_to` and duplicate-aware `move_to` use heuristic duplicate detection. They avoid many duplicate messages, including cases where bodies match but attachments or headers differ, but they can still miss matches if mail is rewritten in transit or lacks enough stable metadata to narrow the search reliably.

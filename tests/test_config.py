@@ -3,7 +3,7 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from mail_custodian.config import load_config
+from mail_custodian.config import find_config_warnings, load_config
 
 
 def test_load_config_merges_includes_and_multiple_files(
@@ -307,3 +307,47 @@ def test_load_config_rejects_unknown_shared_rule_group_account(tmp_path: Path) -
         assert "shared_rule_groups[1].accounts references unknown account 'missing'" in str(exc)
     else:
         raise AssertionError("expected unknown shared rule group account to raise an error")
+
+
+def test_find_config_warnings_reports_duplicate_rule_names_and_likely_slow_rules(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            accounts:
+              - name: personal
+                host: imap.personal.test
+                username: personal-user
+                password: personal-secret
+                rules:
+                  - name: duplicate name
+                    criteria:
+                      from: sender@example.com
+                    actions:
+                      mark_read: true
+                  - name: duplicate name
+                    criteria:
+                      to: user@example.com
+                    actions:
+                      mark_unread: true
+                groups:
+                  - name: shopping
+                    rules:
+                      - name: duplicate name
+                        criteria:
+                          subject_contains:
+                            - coupon
+                        actions:
+                          move_to: "@root/Coupons"
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config([str(tmp_path / "config.yaml")])
+
+    assert find_config_warnings(config) == [
+        "account 'personal' has duplicate rule name 'duplicate name'",
+        "account 'personal' rule 'duplicate name' in mailbox 'INBOX' is likely to be slow because it has no server-side narrowing and may scan every undeleted message",
+        "account 'personal' rule 'duplicate name' in mailbox 'INBOX' is likely to be slow because it has no server-side narrowing and may scan every undeleted message",
+        "account 'personal' rule 'duplicate name (shopping)' in mailbox 'INBOX' is likely to be slow because it has no server-side narrowing and may scan every undeleted message",
+    ]

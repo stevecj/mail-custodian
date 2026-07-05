@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,24 @@ def load_config(paths: list[str]) -> AppConfig:
         merged = _merge_dicts(merged, document)
 
     return _build_app_config(merged)
+
+
+def find_config_warnings(config: AppConfig) -> list[str]:
+    warnings: list[str] = []
+    for account in config.accounts:
+        name_counts = Counter(rule.name for rule in account.rules)
+        for rule_name in sorted(name for name, count in name_counts.items() if count > 1):
+            warnings.append(
+                f"account '{account.name}' has duplicate rule name '{rule_name}'"
+            )
+
+        for rule in account.rules:
+            if _is_likely_slow_rule(rule.criteria):
+                warnings.append(
+                    f"account '{account.name}' rule '{rule.name}' in mailbox '{rule.mailbox}' "
+                    "is likely to be slow because it has no server-side narrowing and may scan every undeleted message"
+                )
+    return warnings
 
 
 def _load_document(path: Path, seen: set[Path]) -> dict[str, Any]:
@@ -509,3 +528,13 @@ def _optional_int(value: Any, context: str, default: int | None = None) -> int |
     if isinstance(value, bool) or not isinstance(value, int):
         raise ConfigError(f"{context} must be an integer")
     return value
+
+
+def _is_likely_slow_rule(criteria: Criteria) -> bool:
+    if criteria.new_messages_only:
+        return False
+    if criteria.seen is not None or criteria.flagged is not None or criteria.answered is not None:
+        return False
+    if criteria.older_than_days is not None or criteria.younger_than_days is not None:
+        return False
+    return True
