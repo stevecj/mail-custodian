@@ -19,6 +19,7 @@ then this warning will be removed.
 ## Features
 
 * IMAP-only operation using Python's standard `imaplib`
+* Gmail IMAP support using OAuth 2.0 and XOAUTH2
 * YAML configuration with support for `includes` , repeated `--config`
   arguments, and a default config path at `~/.config/mail-custodian.yaml`
 * Rule criteria similar to common mail client filters
@@ -70,8 +71,10 @@ Use `config.example.yaml` as a starting point. If you do not pass
 | `port`                     | integer | IMAP server port, default `993`.                                                   |
 | `ssl`                      | boolean | Use IMAPS when `true`, plain IMAP when `false`.                                    |
 | `username`                 | string  | IMAP login user.                                                                   |
-| `password`                 | string  | IMAP password.                                                                     |
-| `password_env`             | string  | Environment variable name containing the password.                                 |
+| `provider`                 | string  | Account provider. Use `gmail` for Gmail OAuth; otherwise omit it or set `generic`. |
+| `password`                 | string  | IMAP password for generic accounts.                                                |
+| `password_env`             | string  | Environment variable name containing the password for generic accounts.             |
+| `gmail_oauth`              | mapping | Gmail OAuth 2.0 settings. Required when `provider: gmail`.                         |
 | `mailbox_root`             | string  | Mailbox name that `@root` resolves to for this account. Defaults to `INBOX`.       |
 | `mailbox_delimiter`        | string  | Separator used when expanding `@root/...` paths for this account. Defaults to `/`. |
 | `default_mailbox`          | string  | Mailbox used when a rule omits `mailbox`.                                          |
@@ -82,6 +85,69 @@ Use `config.example.yaml` as a starting point. If you do not pass
 
 Set either `password` or `password_env` . `password_env` is recommended for
 cron jobs.
+
+For Gmail accounts, do not use `password` or `password_env`. Use
+`provider: gmail` plus a `gmail_oauth` block instead:
+
+```yaml
+accounts:
+  - name: personal-gmail
+    provider: gmail
+    username: person@gmail.com
+    gmail_oauth:
+      client_id: your-desktop-app-client-id
+      client_secret_env: GMAIL_CLIENT_SECRET
+    rules:
+      - name: Flag receipts
+        criteria:
+          subject_contains:
+            - receipt
+        actions:
+          add_flags:
+            - \Flagged
+```
+
+Then run:
+
+```bash
+mail-custodian --authorize-gmail personal-gmail
+```
+
+That opens the Google consent flow in a browser, exchanges the authorization
+code for tokens, and stores the Gmail refresh token under the Mail Custodian
+state directory. Regular runs then use that stored refresh token to obtain
+fresh IMAP access tokens automatically.
+
+### Gmail setup
+
+For regular Gmail and Google Workspace user mailboxes, Mail Custodian uses the
+Google OAuth 2.0 desktop-app flow with the IMAP scope
+`https://mail.google.com/` and authenticates to IMAP with XOAUTH2.
+
+Recommended Google references:
+
+* Gmail in third-party mail clients:
+  <https://support.google.com/mail/answer/7126229?hl=en>
+* Gmail XOAUTH2 for IMAP:
+  <https://developers.google.com/workspace/gmail/imap/xoauth2-protocol>
+* Google OAuth 2.0 for installed/desktop applications:
+  <https://developers.google.com/identity/protocols/oauth2/native-app>
+
+Google's current Gmail guidance says that for personal Google Accounts, IMAP
+is always enabled, so the main setup task is the OAuth connection rather than
+toggling a separate IMAP setting.
+
+In practice, the setup is:
+
+1. Create a Google Cloud project and a **Desktop app** OAuth client.
+2. Put the client ID and client secret in `gmail_oauth`.
+3. Run `mail-custodian --authorize-gmail <account-name>` once to grant access
+   and store the refresh token locally.
+4. Run Mail Custodian normally after that.
+
+For ordinary Gmail accounts, this is a user-consent OAuth flow, not a
+service-account or server-to-server integration. Mail Custodian does not
+currently implement Google Workspace domain-wide delegation.
 
 ### Rule criteria
 
@@ -234,6 +300,12 @@ mail-custodian --config config.yaml --dry-run --verbose
 mail-custodian --version
 ```
 
+Authorize a Gmail account and store its refresh token:
+
+```bash
+mail-custodian --authorize-gmail personal-gmail
+```
+
 ## Checkpoint state
 
 Mail Custodian keeps a per-account, per-mailbox checkpoint for rules that
@@ -248,6 +320,12 @@ The checkpoint file lives at:
 For those opt-in rules, changed or newly added rules do __not__ revisit
 older messages automatically. Delete the checkpoint file to force a full
 rescan.
+
+Gmail refresh tokens obtained with `--authorize-gmail` are stored separately:
+
+* `$XDG_STATE_HOME/mail-custodian/gmail-oauth.json` when `XDG_STATE_HOME`
+  is set
+* `~/.local/state/mail-custodian/gmail-oauth.json` otherwise
 
 ## Tests
 
@@ -287,4 +365,3 @@ python -m pytest
   bodies match but attachments or headers differ, but they can still miss
   matches if mail is rewritten in transit or lacks enough stable metadata
   to narrow the search reliably.
-

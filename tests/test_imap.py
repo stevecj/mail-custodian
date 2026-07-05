@@ -8,7 +8,7 @@ from email.parser import BytesParser
 
 import mail_custodian.imap_client
 from mail_custodian.imap_client import COPY_ID_HEADER, IMAPSession
-from mail_custodian.models import AccountConfig, Actions, ActionTarget, Criteria, MessageData
+from mail_custodian.models import AccountConfig, Actions, ActionTarget, Criteria, GmailOAuthConfig, MessageData
 
 
 class FakeConnection:
@@ -137,6 +137,15 @@ class FakeConnection:
             return "OK", [(metadata, raw_message)]
         return "NO", [b"message not found"]
 
+    def login(self, username: str, password: str) -> None:
+        self.login_call = (username, password)
+
+    def authenticate(self, mechanism: str, auth_callback) -> None:
+        self.authenticate_call = (mechanism, auth_callback(b""))
+
+    def logout(self) -> None:
+        self.logged_out = True
+
 
 def _matches_search(message: EmailMessage, criteria: tuple[tuple[str, str], ...]) -> bool:
     if not criteria:
@@ -161,6 +170,32 @@ def _build_session(name: str = "test") -> IMAPSession:
     session.capabilities = {"IMAP4REV1"}
     session.current_mailbox = "INBOX"
     return session
+
+
+def test_imap_session_uses_gmail_xoauth2_auth(monkeypatch) -> None:
+    fake_connection = FakeConnection()
+    fake_connection.capabilities = [b"IMAP4rev1", b"AUTH=XOAUTH2"]
+    monkeypatch.setattr(mail_custodian.imap_client.imaplib, "IMAP4_SSL", lambda *args, **kwargs: fake_connection)
+    monkeypatch.setattr(mail_custodian.imap_client, "refresh_access_token", lambda account: "access-token")
+
+    account = AccountConfig(
+        name="gmail",
+        host="imap.gmail.com",
+        username="person@gmail.com",
+        provider="gmail",
+        gmail_oauth=GmailOAuthConfig(
+            client_id="desktop-client-id",
+            client_secret="desktop-client-secret",
+        ),
+    )
+
+    with IMAPSession(account) as session:
+        assert session.connection is fake_connection
+
+    assert fake_connection.authenticate_call == (
+        "XOAUTH2",
+        b"user=person@gmail.com\x01auth=Bearer access-token\x01\x01",
+    )
 
 
 def _build_message(

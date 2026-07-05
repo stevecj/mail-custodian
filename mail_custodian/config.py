@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from .models import AccountConfig, Actions, ActionTarget, AppConfig, Criteria, Rule
+from .models import AccountConfig, Actions, ActionTarget, AppConfig, Criteria, GmailOAuthConfig, Rule
 
 
 class ConfigError(ValueError):
@@ -33,7 +33,7 @@ class _SharedRuleGroupSpec:
     rules_data: tuple[dict[str, Any], ...]
 
 
-def load_config(paths: list[str]) -> AppConfig:
+def load_config(paths: list[str], *, require_rules: bool = True) -> AppConfig:
     if not paths:
         raise ConfigError("at least one --config path is required")
 
@@ -43,7 +43,7 @@ def load_config(paths: list[str]) -> AppConfig:
         document = _load_document(path, seen=set())
         merged = _merge_dicts(merged, document)
 
-    return _build_app_config(merged)
+    return _build_app_config(merged, require_rules=require_rules)
 
 
 def find_config_warnings(config: AppConfig) -> list[str]:
@@ -103,7 +103,7 @@ def _merge_dicts(base: dict[str, Any], incoming: dict[str, Any]) -> dict[str, An
     return merged
 
 
-def _build_app_config(data: dict[str, Any]) -> AppConfig:
+def _build_app_config(data: dict[str, Any], *, require_rules: bool) -> AppConfig:
     accounts_data = data.get("accounts")
     if not isinstance(accounts_data, list) or not accounts_data:
         raise ConfigError("config must define a non-empty 'accounts' list")
@@ -130,7 +130,7 @@ def _build_app_config(data: dict[str, Any]) -> AppConfig:
     accounts = _apply_shared_rules(accounts, shared_rules)
     accounts = _apply_shared_rule_groups(accounts, shared_rule_groups)
     _validate_accounts(accounts)
-    if not any(account.rules for account in accounts):
+    if require_rules and not any(account.rules for account in accounts):
         raise ConfigError("config must define at least one rule across 'accounts', 'shared_rules', and 'shared_rule_groups'")
     return AppConfig(log_level=log_level.upper(), accounts=accounts)
 
@@ -138,19 +138,14 @@ def _build_app_config(data: dict[str, Any]) -> AppConfig:
 def _build_account(index: int, data: Any) -> AccountConfig:
     context = f"accounts[{index}]"
     mapping = _ensure_mapping(data, context)
+    provider = _optional_string(mapping.get("provider"), f"{context}.provider", default="generic")
+    if provider not in {"generic", "gmail"}:
+        raise ConfigError(f"{context}.provider must be 'generic' or 'gmail'")
 
-    password = mapping.get("password")
-    password_env = mapping.get("password_env")
-    if password is None and password_env is None:
-        raise ConfigError(f"{context} must set either 'password' or 'password_env'")
-    if password is not None and not isinstance(password, str):
-        raise ConfigError(f"{context}.password must be a string")
-    if password_env is not None and not isinstance(password_env, str):
-        raise ConfigError(f"{context}.password_env must be a string")
-    if password is None:
-        password = os.environ.get(password_env)
-        if not password:
-            raise ConfigError(f"{context}.password_env points to an unset environment variable: {password_env}")
+    password, gmail_oauth = _build_account_auth(mapping, context, provider)
+    host = _optional_string(mapping.get("host"), f"{context}.host", default="imap.gmail.com" if provider == "gmail" else None)
+    if host is None:
+        raise ConfigError(f"{context}.host must be a non-empty string")
 
     rules_data = mapping.get("rules", [])
     if not isinstance(rules_data, list):
@@ -170,9 +165,11 @@ def _build_account(index: int, data: Any) -> AccountConfig:
 
     return AccountConfig(
         name=_require_string(mapping, "name", context),
-        host=_require_string(mapping, "host", context),
+        host=host,
         username=_require_string(mapping, "username", context),
         password=password,
+        provider=provider,
+        gmail_oauth=gmail_oauth,
         port=_optional_int(mapping.get("port"), f"{context}.port", default=993),
         ssl=_optional_bool(mapping.get("ssl"), f"{context}.ssl", default=True),
         timeout=_optional_int(mapping.get("timeout"), f"{context}.timeout", default=30),
@@ -189,6 +186,62 @@ def _build_account(index: int, data: Any) -> AccountConfig:
             default=False,
         ),
         rules=tuple(rules),
+    )
+
+
+def _build_account_auth(
+    mapping: dict[str, Any],
+    context: str,
+    provider: str,
+) -> tuple[str | None, GmailOAuthConfig | None]:
+    password = mapping.get("password")
+    password_env = mapping.get("password_env")
+    gmail_oauth_data = mapping.get("gmail_oauth")
+
+    if provider == "gmail":
+        if password is not None or password_env is not None:
+            raise ConfigError(f"{context} must not set 'password' or 'password_env' when provider is 'gmail'")
+        return None, _build_gmail_oauth(gmail_oauth_data, context)
+
+    if gmail_oauth_data is not None:
+        raise ConfigError(f"{context}.gmail_oauth is only valid when provider is 'gmail'")
+    if password is None and password_env is None:
+        raise ConfigError(f"{context} must set either 'password' or 'password_env'")
+    if password is not None and not isinstance(password, str):
+        raise ConfigError(f"{context}.password must be a string")
+    if password_env is not None and not isinstance(password_env, str):
+        raise ConfigError(f"{context}.password_env must be a string")
+    if password is None:
+        password = os.environ.get(password_env)
+        if not password:
+            raise ConfigError(f"{context}.password_env points to an unset environment variable: {password_env}")
+    return password, None
+
+
+def _build_gmail_oauth(value: Any, context: str) -> GmailOAuthConfig:
+    oauth_context = f"{context}.gmail_oauth"
+    mapping = _ensure_mapping(value, oauth_context)
+    client_secret = _string_or_secret_from_env(
+        mapping.get("client_secret"),
+        mapping.get("client_secret_env"),
+        f"{oauth_context}.client_secret",
+        f"{oauth_context}.client_secret_env",
+        required=True,
+    )
+    refresh_token = _string_or_secret_from_env(
+        mapping.get("refresh_token"),
+        mapping.get("refresh_token_env"),
+        f"{oauth_context}.refresh_token",
+        f"{oauth_context}.refresh_token_env",
+        required=False,
+    )
+    return GmailOAuthConfig(
+        client_id=_require_string(mapping, "client_id", oauth_context),
+        client_secret=client_secret,
+        refresh_token=refresh_token,
+        auth_uri=_optional_string(mapping.get("auth_uri"), f"{oauth_context}.auth_uri", default=GmailOAuthConfig.auth_uri),
+        token_uri=_optional_string(mapping.get("token_uri"), f"{oauth_context}.token_uri", default=GmailOAuthConfig.token_uri),
+        scope=_optional_string(mapping.get("scope"), f"{oauth_context}.scope", default=GmailOAuthConfig.scope),
     )
 
 
@@ -498,6 +551,32 @@ def _string_or_default(value: Any, default: str, context: str) -> str:
     if not isinstance(value, str) or not value:
         raise ConfigError(f"{context} must be a non-empty string")
     return value
+
+
+def _string_or_secret_from_env(
+    value: Any,
+    env_name: Any,
+    value_context: str,
+    env_context: str,
+    *,
+    required: bool,
+) -> str | None:
+    if value is not None and env_name is not None:
+        raise ConfigError(f"set either {value_context} or {env_context}, not both")
+    if value is not None:
+        if not isinstance(value, str) or not value:
+            raise ConfigError(f"{value_context} must be a non-empty string")
+        return value
+    if env_name is not None:
+        if not isinstance(env_name, str) or not env_name:
+            raise ConfigError(f"{env_context} must be a non-empty string")
+        env_value = os.environ.get(env_name)
+        if not env_value:
+            raise ConfigError(f"{env_context} points to an unset environment variable: {env_name}")
+        return env_value
+    if required:
+        raise ConfigError(f"must set either {value_context} or {env_context}")
+    return None
 
 
 def _string_list(value: Any, context: str) -> tuple[str, ...]:

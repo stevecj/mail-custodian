@@ -9,6 +9,7 @@ from email.message import EmailMessage
 from email.parser import BytesParser
 from html import unescape
 
+from .gmail_oauth import build_xoauth2_response, refresh_access_token
 from .mailer import forward_message
 from .models import AccountConfig, ActionResult, Actions, ActionTarget, Criteria, MessageData, resolve_mailbox_name
 
@@ -30,7 +31,20 @@ class IMAPSession:
         else:
             connection = imaplib.IMAP4(self.account.host, self.account.port, timeout=self.account.timeout)
 
-        connection.login(self.account.username, self.account.password)
+        if self.account.gmail_oauth is not None:
+            access_token = refresh_access_token(self.account)
+            xoauth2_response = build_xoauth2_response(self.account.username, access_token)
+
+            def auth_callback(challenge: bytes) -> bytes:
+                if challenge:
+                    return b""
+                return xoauth2_response
+
+            connection.authenticate("XOAUTH2", auth_callback)
+        else:
+            if self.account.password is None:
+                raise RuntimeError(f"account '{self.account.name}' does not have a password configured")
+            connection.login(self.account.username, self.account.password)
         self.connection = connection
         self.capabilities = {
             value.decode("ascii", errors="ignore").upper() if isinstance(value, bytes) else value.upper()

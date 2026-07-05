@@ -19,6 +19,13 @@ def default_state_path() -> Path:
     return Path.home() / ".local" / "state" / "mail-custodian" / "checkpoints.json"
 
 
+def default_gmail_oauth_path() -> Path:
+    base = os.environ.get("XDG_STATE_HOME")
+    if base:
+        return Path(base).expanduser() / "mail-custodian" / "gmail-oauth.json"
+    return Path.home() / ".local" / "state" / "mail-custodian" / "gmail-oauth.json"
+
+
 class MailboxStateStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or default_state_path()
@@ -126,5 +133,82 @@ class MailboxStateStore:
                     last_uid=last_uid,
                 )
             parsed[account_name] = parsed_mailboxes
+
+        self._data = parsed
+
+
+class GmailOAuthStore:
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path or default_gmail_oauth_path()
+        self._loaded = False
+        self._dirty = False
+        self._data: dict[str, str] = {}
+
+    def get(self, account_name: str) -> str | None:
+        self._ensure_loaded()
+        return self._data.get(account_name)
+
+    def put(self, account_name: str, refresh_token: str) -> None:
+        self._ensure_loaded()
+        if self._data.get(account_name) == refresh_token:
+            return
+        self._data[account_name] = refresh_token
+        self._dirty = True
+
+    def save(self) -> None:
+        self._ensure_loaded()
+        if not self._dirty:
+            return
+
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "accounts": dict(sorted(self._data.items())),
+        }
+
+        with NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=self.path.parent,
+            prefix=".gmail-oauth.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+
+        temp_path.replace(self.path)
+        self._dirty = False
+
+    def _ensure_loaded(self) -> None:
+        if self._loaded:
+            return
+        self._loaded = True
+        if not self.path.exists():
+            return
+
+        try:
+            raw_data = json.loads(self.path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise StateError(f"failed to parse Gmail OAuth state file {self.path}: {exc}") from exc
+
+        if not isinstance(raw_data, dict):
+            raise StateError(f"Gmail OAuth state file {self.path} must contain a JSON object")
+        version = raw_data.get("version")
+        if version != 1:
+            raise StateError(f"unsupported Gmail OAuth state version in {self.path}: {version!r}")
+
+        raw_accounts = raw_data.get("accounts", {})
+        if not isinstance(raw_accounts, dict):
+            raise StateError(f"Gmail OAuth state file {self.path} has an invalid 'accounts' section")
+
+        parsed: dict[str, str] = {}
+        for account_name, refresh_token in raw_accounts.items():
+            if not isinstance(account_name, str) or not account_name:
+                raise StateError(f"Gmail OAuth state file {self.path} has an invalid account name")
+            if not isinstance(refresh_token, str) or not refresh_token:
+                raise StateError(f"Gmail OAuth state file {self.path} has an invalid refresh token entry")
+            parsed[account_name] = refresh_token
 
         self._data = parsed

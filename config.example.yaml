@@ -73,6 +73,24 @@ accounts:
         actions:
           mark_unread: true
 
+  - name: personal-gmail
+    provider: gmail
+    username: person@gmail.com
+    gmail_oauth:
+      client_id: your-desktop-app-client-id
+      client_secret_env: GMAIL_CLIENT_SECRET
+    default_mailbox: "@root"
+    create_missing_mailboxes: true
+    rules:
+      - name: Flag Gmail receipts
+        mailbox: "@root"
+        criteria:
+          subject_contains:
+            - receipt
+        actions:
+          add_flags:
+            - \Flagged
+
   - name: shopping
     host: imap.shopping.example.com
     port: 993

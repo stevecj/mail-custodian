@@ -88,6 +88,16 @@ class Actions:
 
 
 @dataclass(frozen=True)
+class GmailOAuthConfig:
+    client_id: str
+    client_secret: str
+    refresh_token: str | None = None
+    auth_uri: str = "https://accounts.google.com/o/oauth2/v2/auth"
+    token_uri: str = "https://oauth2.googleapis.com/token"
+    scope: str = "https://mail.google.com/"
+
+
+@dataclass(frozen=True)
 class Rule:
     name: str
     mailbox: str
@@ -100,7 +110,9 @@ class AccountConfig:
     name: str
     host: str
     username: str
-    password: str
+    password: str | None = None
+    provider: str = "generic"
+    gmail_oauth: GmailOAuthConfig | None = None
     port: int = 993
     ssl: bool = True
     timeout: int = 30

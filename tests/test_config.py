@@ -354,3 +354,89 @@ def test_find_config_warnings_reports_duplicate_rule_names_and_likely_slow_rules
         "account 'personal' rule 'duplicate name' in mailbox 'INBOX' is likely to be slow because it has no server-side narrowing and may scan every undeleted message",
         "account 'personal' rule 'duplicate name (shopping)' in mailbox 'INBOX' is likely to be slow because it has no server-side narrowing and may scan every undeleted message",
     ]
+
+
+def test_load_config_builds_gmail_account_with_oauth(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            accounts:
+              - name: gmail
+                provider: gmail
+                username: person@gmail.com
+                gmail_oauth:
+                  client_id: desktop-client-id
+                  client_secret_env: GMAIL_CLIENT_SECRET
+                rules:
+                  - name: mark receipts
+                    criteria:
+                      subject_contains:
+                        - receipt
+                    actions:
+                      mark_read: true
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GMAIL_CLIENT_SECRET", "desktop-client-secret")
+
+    config = load_config([str(tmp_path / "config.yaml")])
+
+    account = config.accounts[0]
+    assert account.provider == "gmail"
+    assert account.host == "imap.gmail.com"
+    assert account.password is None
+    assert account.gmail_oauth is not None
+    assert account.gmail_oauth.client_secret == "desktop-client-secret"
+    assert account.gmail_oauth.scope == "https://mail.google.com/"
+
+
+def test_load_config_allows_gmail_authorization_config_without_rules(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            accounts:
+              - name: gmail
+                provider: gmail
+                username: person@gmail.com
+                gmail_oauth:
+                  client_id: desktop-client-id
+                  client_secret_env: GMAIL_CLIENT_SECRET
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GMAIL_CLIENT_SECRET", "desktop-client-secret")
+
+    config = load_config([str(tmp_path / "config.yaml")], require_rules=False)
+
+    assert config.accounts[0].rules == ()
+
+
+def test_load_config_rejects_password_auth_for_gmail(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            accounts:
+              - name: gmail
+                provider: gmail
+                username: person@gmail.com
+                password: app-password
+                gmail_oauth:
+                  client_id: desktop-client-id
+                  client_secret: desktop-client-secret
+                rules:
+                  - name: noop
+                    actions:
+                      mark_read: true
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    try:
+        load_config([str(tmp_path / "config.yaml")])
+    except ValueError as exc:
+        assert "must not set 'password' or 'password_env' when provider is 'gmail'" in str(exc)
+    else:
+        raise AssertionError("expected Gmail password auth to raise an error")
