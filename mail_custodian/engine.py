@@ -5,15 +5,23 @@ import logging
 from collections import defaultdict
 
 from .imap_client import IMAPSession
-from .models import AccountConfig, ActionTarget, Actions, AppConfig, Rule, resolve_mailbox_name
+from .models import AccountConfig, ActionTarget, Actions, AppConfig, MailboxCheckpoint, Rule, resolve_mailbox_name
+from .state import MailboxStateStore
 
 LOGGER = logging.getLogger(__name__)
 
 
 class FilterEngine:
-    def __init__(self, config: AppConfig, *, dry_run: bool = False) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        *,
+        dry_run: bool = False,
+        checkpoint_store: MailboxStateStore | None = None,
+    ) -> None:
         self.config = config
         self.dry_run = dry_run
+        self.checkpoint_store = checkpoint_store or MailboxStateStore()
 
     def run(self) -> int:
         failures = 0
@@ -40,12 +48,22 @@ class FilterEngine:
         session = _get_session(account, sessions=sessions, exit_stack=exit_stack)
         for mailbox, rules in grouped_rules.items():
             session.select_mailbox(mailbox)
+            checkpoint = self.checkpoint_store.get(account.name, mailbox)
+            uidvalidity = session.get_mailbox_uidvalidity()
+            since_uid = checkpoint.last_uid if checkpoint and checkpoint.uidvalidity == uidvalidity else None
+            pending_uids = session.list_uids(since_uid=since_uid)
             blocked_uids: set[str] = set()
             expunge_needed = False
+            if checkpoint and checkpoint.uidvalidity != uidvalidity:
+                LOGGER.info(
+                    "UIDVALIDITY changed for account=%s mailbox=%s; rescanning mailbox from the beginning",
+                    account.name,
+                    mailbox,
+                )
 
             for rule in rules:
                 LOGGER.info("account=%s mailbox=%s rule=%s", account.name, mailbox, rule.name)
-                candidate_uids = session.search_uids(rule.criteria)
+                candidate_uids = session.search_uids(rule.criteria, since_uid=since_uid)
                 for uid in candidate_uids:
                     if uid in blocked_uids:
                         continue
@@ -97,6 +115,14 @@ class FilterEngine:
 
             if expunge_needed and not self.dry_run:
                 session.expunge()
+            if not self.dry_run:
+                last_uid = max((int(uid) for uid in pending_uids), default=(since_uid or 0))
+                self.checkpoint_store.put(
+                    account.name,
+                    mailbox,
+                    MailboxCheckpoint(uidvalidity=uidvalidity, last_uid=last_uid),
+                )
+                self.checkpoint_store.save()
 
 
 def _group_rules_by_mailbox(account: AccountConfig, rules: tuple[Rule, ...]) -> dict[str, list[Rule]]:

@@ -21,6 +21,7 @@ class IMAPSession:
         self.connection: imaplib.IMAP4 | imaplib.IMAP4_SSL | None = None
         self.capabilities: set[str] = set()
         self.current_mailbox: str | None = None
+        self.current_uidvalidity: int | None = None
 
     def __enter__(self) -> "IMAPSession":
         if self.account.ssl:
@@ -53,9 +54,24 @@ class IMAPSession:
         if status != "OK":
             raise RuntimeError(f"failed to select mailbox '{resolved_mailbox}': {data}")
         self.current_mailbox = resolved_mailbox
+        self.current_uidvalidity = _read_uidvalidity(connection, resolved_mailbox)
 
-    def search_uids(self, criteria: Criteria) -> list[str]:
-        return self._search_selected_mailbox_uids(self._build_search_terms(criteria))
+    def get_mailbox_uidvalidity(self) -> int:
+        if self.current_uidvalidity is None:
+            raise RuntimeError(f"UIDVALIDITY is unavailable for mailbox '{self.current_mailbox}'")
+        return self.current_uidvalidity
+
+    def list_uids(self, *, since_uid: int | None = None) -> list[str]:
+        terms = ["ALL"]
+        if since_uid is not None:
+            terms.extend(["UID", f"{since_uid + 1}:*"])
+        return self._search_selected_mailbox_uids(terms)
+
+    def search_uids(self, criteria: Criteria, *, since_uid: int | None = None) -> list[str]:
+        terms = self._build_search_terms(criteria)
+        if since_uid is not None:
+            terms.extend(["UID", f"{since_uid + 1}:*"])
+        return self._search_selected_mailbox_uids(terms)
 
     def fetch_message(self, uid: str) -> MessageData:
         connection = self._require_connection()
@@ -331,6 +347,21 @@ def _parse_flags(metadata: bytes) -> list[str]:
     if not match or not match.group(1).strip():
         return []
     return [item for item in match.group(1).split() if item]
+
+
+def _read_uidvalidity(
+    connection: imaplib.IMAP4 | imaplib.IMAP4_SSL,
+    mailbox: str,
+) -> int:
+    status, data = connection.response("UIDVALIDITY")
+    if status != "OK" or not data or data[0] is None:
+        raise RuntimeError(f"failed to read UIDVALIDITY for mailbox '{mailbox}'")
+
+    raw_value = data[0]
+    text = raw_value.decode("ascii", errors="ignore") if isinstance(raw_value, bytes) else str(raw_value)
+    if not text.isdigit():
+        raise RuntimeError(f"invalid UIDVALIDITY for mailbox '{mailbox}': {text!r}")
+    return int(text)
 
 
 def _parse_size(metadata: bytes) -> int:

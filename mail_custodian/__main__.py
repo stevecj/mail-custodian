@@ -6,6 +6,7 @@ import sys
 
 from .config import ConfigError, load_config
 from .engine import FilterEngine
+from .state import StateError
 
 
 def main() -> int:
@@ -22,8 +23,12 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    engine = FilterEngine(config, dry_run=args.dry_run)
-    return engine.run()
+    try:
+        engine = FilterEngine(config, dry_run=args.dry_run)
+        return engine.run()
+    except StateError as exc:
+        print(f"State error: {exc}", file=sys.stderr)
+        return 2
 
 
 def _parse_args() -> argparse.Namespace:

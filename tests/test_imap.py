@@ -14,6 +14,7 @@ class FakeConnection:
     def __init__(self) -> None:
         self.created_mailboxes: set[str] = set()
         self.mailboxes: dict[str, list[dict[str, object]]] = {"INBOX": []}
+        self.uidvalidity_by_mailbox: dict[str, int] = {"INBOX": 999}
         self.selected_mailbox: str | None = None
         self.uid_calls: list[tuple[str, tuple[str, ...]]] = []
         self.append_calls: list[tuple[str, str | None, str, bytes]] = []
@@ -31,7 +32,13 @@ class FakeConnection:
     def select(self, mailbox: str):
         self.selected_mailbox = mailbox
         self.mailboxes.setdefault(mailbox, [])
+        self.uidvalidity_by_mailbox.setdefault(mailbox, 999)
         return "OK", [b""]
+
+    def response(self, code: str):
+        if code.upper() != "UIDVALIDITY" or self.selected_mailbox is None:
+            return "NO", [None]
+        return "OK", [str(self.uidvalidity_by_mailbox[self.selected_mailbox]).encode()]
 
     def list(self, _reference: str, mailbox: str):
         if mailbox in self.mailboxes or mailbox in self.created_mailboxes:
@@ -41,6 +48,7 @@ class FakeConnection:
     def create(self, mailbox: str):
         self.created_mailboxes.add(mailbox)
         self.mailboxes.setdefault(mailbox, [])
+        self.uidvalidity_by_mailbox.setdefault(mailbox, 999)
         return "OK", [b"created"]
 
     def append(self, mailbox: str, flags: str | None, date_time: str, message: bytes):
@@ -82,10 +90,35 @@ class FakeConnection:
         if self.selected_mailbox is None:
             return "NO", [b"no mailbox selected"]
         records = self.mailboxes.get(self.selected_mailbox, [])
+        minimum_uid = 0
+        header_terms: list[tuple[str, str]] = []
+        index = 0
+        while index < len(criteria):
+            term = criteria[index]
+            if term in {"ALL", "UNDELETED", "SEEN", "UNSEEN", "FLAGGED", "UNFLAGGED", "ANSWERED", "UNANSWERED"}:
+                index += 1
+                continue
+            if term in {"BEFORE", "SINCE"}:
+                index += 2
+                continue
+            if term == "UID":
+                range_value = criteria[index + 1]
+                start_text, _, _ = range_value.partition(":")
+                minimum_uid = int(start_text)
+                index += 2
+                continue
+            if term == "HEADER":
+                header_terms.append((criteria[index + 1], criteria[index + 2].casefold()))
+                index += 3
+                continue
+            return "NO", [f"unsupported search term {term!r}".encode()]
+
         matches: list[str] = []
         for record in records:
+            if int(str(record["uid"])) < minimum_uid:
+                continue
             message = BytesParser(policy=policy.default).parsebytes(record["message"])
-            if _matches_search(message, criteria):
+            if _matches_search(message, tuple(header_terms)):
                 matches.append(str(record["uid"]))
         return "OK", [" ".join(matches).encode()]
 
@@ -104,17 +137,10 @@ class FakeConnection:
         return "NO", [b"message not found"]
 
 
-def _matches_search(message: EmailMessage, criteria: tuple[str, ...]) -> bool:
+def _matches_search(message: EmailMessage, criteria: tuple[tuple[str, str], ...]) -> bool:
     if not criteria:
         return True
-    if len(criteria) % 3 != 0:
-        return False
-
-    for index in range(0, len(criteria), 3):
-        if criteria[index] != "HEADER":
-            return False
-        header_name = criteria[index + 1]
-        needle = criteria[index + 2].casefold()
+    for header_name, needle in criteria:
         header_value = "\n".join(message.get_all(header_name, []))
         if needle not in header_value.casefold():
             return False
@@ -187,6 +213,17 @@ def test_search_terms_include_flag_and_age_filters() -> None:
     assert "FLAGGED" in terms
     assert "BEFORE" in terms
     assert "SINCE" in terms
+
+
+def test_list_uids_filters_by_uid_checkpoint() -> None:
+    session = _build_session()
+    session.connection.add_message("INBOX", _build_message(uid="1").raw_message, uid="1")
+    session.connection.add_message("INBOX", _build_message(uid="2").raw_message, uid="2")
+    session.connection.add_message("INBOX", _build_message(uid="3").raw_message, uid="3")
+    session.current_mailbox = None
+    session.select_mailbox("INBOX")
+
+    assert session.list_uids(since_uid=1) == ["2", "3"]
 
 
 def test_apply_actions_creates_and_updates_mailboxes() -> None:

@@ -116,6 +116,12 @@ class AppConfig:
 
 
 @dataclass(frozen=True)
+class MailboxCheckpoint:
+    uidvalidity: int
+    last_uid: int
+
+
+@dataclass(frozen=True)
 class MessageData:
     uid: str
     mailbox: str

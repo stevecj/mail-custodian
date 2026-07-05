@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from pathlib import Path
 
 from mail_custodian.engine import FilterEngine
 from mail_custodian.models import (
@@ -11,9 +12,11 @@ from mail_custodian.models import (
     ActionTarget,
     AppConfig,
     Criteria,
+    MailboxCheckpoint,
     MessageData,
     Rule,
 )
+from mail_custodian.state import MailboxStateStore
 
 
 class FakeSession:
@@ -22,6 +25,8 @@ class FakeSession:
     def __init__(self, account: AccountConfig) -> None:
         self.account = account
         self.selected_mailboxes: list[str] = []
+        self.list_uids_calls: list[int | None] = []
+        self.search_uids_calls: list[int | None] = []
         self.apply_calls: list[dict[str, object]] = []
         FakeSession.instances[account.name] = self
 
@@ -34,8 +39,18 @@ class FakeSession:
     def select_mailbox(self, mailbox: str) -> None:
         self.selected_mailboxes.append(mailbox)
 
-    def search_uids(self, criteria: Criteria) -> list[str]:
+    def get_mailbox_uidvalidity(self) -> int:
+        return 999
+
+    def list_uids(self, *, since_uid: int | None = None) -> list[str]:
+        self.list_uids_calls.append(since_uid)
+        if self.account.name == "source":
+            return ["7"]
+        return []
+
+    def search_uids(self, criteria: Criteria, *, since_uid: int | None = None) -> list[str]:
         del criteria
+        self.search_uids_calls.append(since_uid)
         return ["7"] if self.account.name == "source" else []
 
     def fetch_message(self, uid: str) -> MessageData:
@@ -144,3 +159,39 @@ def test_engine_routes_cross_account_action_to_target_session(monkeypatch) -> No
     assert source_session.apply_calls[0]["copy_session"] is review_session
     assert source_session.apply_calls[0]["copy_create_missing_mailboxes"] is True
     assert source_session.apply_calls[0]["actions"].copy_to == ActionTarget(mailbox="Mail.Review.Spam", account="review")
+
+
+def test_engine_persists_mailbox_checkpoint(monkeypatch, tmp_path: Path) -> None:
+    FakeSession.instances = {}
+    monkeypatch.setattr("mail_custodian.engine.IMAPSession", FakeSession)
+    store = MailboxStateStore(tmp_path / "checkpoints.json")
+    store.put("source", "INBOX", MailboxCheckpoint(uidvalidity=999, last_uid=6))
+    store.save()
+
+    config = AppConfig(
+        log_level="INFO",
+        accounts=(
+            AccountConfig(
+                name="source",
+                host="imap.source.test",
+                username="source-user",
+                password="source-secret",
+                rules=(
+                    Rule(
+                        name="local rule",
+                        mailbox="INBOX",
+                        criteria=Criteria(),
+                        actions=Actions(mark_read=True),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    assert FilterEngine(config, checkpoint_store=store).run() == 0
+
+    source_session = FakeSession.instances["source"]
+    assert source_session.list_uids_calls == [6]
+    assert source_session.search_uids_calls == [6]
+    reloaded = MailboxStateStore(tmp_path / "checkpoints.json")
+    assert reloaded.get("source", "INBOX") == MailboxCheckpoint(uidvalidity=999, last_uid=7)

@@ -144,6 +144,17 @@ Dry run:
 mail-custodian --config config.yaml --dry-run --verbose
 ```
 
+## Checkpoint state
+
+Mail Custodian keeps a per-account, per-mailbox checkpoint so each run only evaluates messages with UIDs newer than the last successful scan for that mailbox.
+
+The checkpoint file lives at:
+
+- `$XDG_STATE_HOME/mail-custodian/checkpoints.json` when `XDG_STATE_HOME` is set
+- `~/.local/state/mail-custodian/checkpoints.json` otherwise
+
+Changed or newly added rules do **not** revisit older messages automatically. Delete the checkpoint file to force a full rescan.
+
 ## Tests
 
 ```bash
@@ -159,6 +170,7 @@ python -m pytest
 ## Notes
 
 - The program fetches matching candidates directly from IMAP and never keeps its own message store.
+- Mailbox checkpoints use IMAP `UIDVALIDITY` plus the highest processed UID. If `UIDVALIDITY` changes, Mail Custodian rescans that mailbox from the beginning.
 - Rules are evaluated mailbox by mailbox in the order they appear in the merged configuration.
 - Shared rules are expanded into each listed account during config loading, after that account's local rules.
 - The fallback move implementation expunges after the mailbox pass completes.
