@@ -3,10 +3,13 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from .config import ConfigError, find_config_warnings, load_config
 from .engine import FilterEngine
 from .state import StateError
+
+DEFAULT_CONFIG_PATH = str(Path("~/.config/mail-custodian.yaml").expanduser())
 
 
 def main() -> int:
@@ -42,8 +45,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         action="append",
-        required=True,
-        help="Path to a YAML config file. Repeat to merge multiple files.",
+        default=[DEFAULT_CONFIG_PATH],
+        help=(
+            "Path to a YAML config file. Repeat to merge multiple files. "
+            f"Defaults to {DEFAULT_CONFIG_PATH}."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -55,7 +61,10 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.config and args.config[0] == DEFAULT_CONFIG_PATH and len(args.config) > 1:
+        args.config = args.config[1:]
+    return args
 
 
 if __name__ == "__main__":

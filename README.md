@@ -15,7 +15,7 @@ then this warning will be removed.
 ## Features
 
 - IMAP-only operation using Python's standard `imaplib`
-- YAML configuration with support for `includes` and repeated `--config` arguments
+- YAML configuration with support for `includes`, repeated `--config` arguments, and a default config path at `~/.config/mail-custodian.yaml`
 - Rule criteria similar to common mail client filters
 - Cron-safe CLI with `--dry-run` mode for safe rollout
 - No message database; messages remain on the IMAP server
@@ -42,7 +42,7 @@ pip install -e '.[test]'
 
 ## Configuration
 
-Use `config.example.yaml` as a starting point.
+Use `config.example.yaml` as a starting point. If you do not pass `--config`, Mail Custodian loads `~/.config/mail-custodian.yaml`.
 
 ### Top-level keys
 
@@ -182,6 +182,12 @@ shared_rule_groups:
 | `stop_processing` | Stop later rules from touching the same message in the same run. |
 
 ## Running
+
+```bash
+mail-custodian
+```
+
+That uses `~/.config/mail-custodian.yaml` by default. To choose a different file:
 
 ```bash
 mail-custodian --config config.yaml
