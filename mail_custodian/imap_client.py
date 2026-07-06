@@ -44,11 +44,19 @@ class IMAPSession:
                     return b""
                 return xoauth2_response
 
-            connection.authenticate("XOAUTH2", auth_callback)
+            _run_imap_command(
+                "AUTHENTICATE",
+                f"mechanism=XOAUTH2 user={self.account.username}",
+                lambda: connection.authenticate("XOAUTH2", auth_callback),
+            )
         else:
             if self.account.password is None:
                 raise RuntimeError(f"account '{self.account.name}' does not have a password configured")
-            connection.login(self.account.username, self.account.password)
+            _run_imap_command(
+                "LOGIN",
+                f"user={self.account.username}",
+                lambda: connection.login(self.account.username, self.account.password),
+            )
         self.connection = connection
         self.capabilities = {
             value.decode("ascii", errors="ignore").upper() if isinstance(value, bytes) else value.upper()
@@ -60,7 +68,7 @@ class IMAPSession:
         if not self.connection:
             return
         try:
-            self.connection.logout()
+            _run_imap_command("LOGOUT", "", self.connection.logout)
         finally:
             self.connection = None
 
@@ -72,7 +80,11 @@ class IMAPSession:
             if need_uidvalidity:
                 self.current_uidvalidity = self.mailbox_uidvalidities.get(resolved_mailbox)
             return
-        status, data = connection.select(resolved_mailbox)
+        status, data = _run_imap_command(
+            "SELECT",
+            f"mailbox={resolved_mailbox}",
+            lambda: connection.select(resolved_mailbox),
+        )
         if status != "OK":
             raise RuntimeError(f"failed to select mailbox '{resolved_mailbox}': {data}")
         self.current_mailbox = resolved_mailbox
@@ -104,7 +116,11 @@ class IMAPSession:
 
     def fetch_message(self, uid: str) -> MessageData:
         connection = self._require_connection()
-        status, data = connection.uid("fetch", uid, "(FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[])")
+        status, data = _run_imap_command(
+            "UID FETCH",
+            f"mailbox={self.current_mailbox} uid={uid}",
+            lambda: connection.uid("fetch", uid, "(FLAGS RFC822.SIZE INTERNALDATE BODY.PEEK[])"),
+        )
         if status != "OK":
             raise RuntimeError(f"failed to fetch message UID {uid}: {data}")
 
@@ -218,7 +234,11 @@ class IMAPSession:
 
     def expunge(self) -> None:
         connection = self._require_connection()
-        status, data = connection.expunge()
+        status, data = _run_imap_command(
+            "EXPUNGE",
+            f"mailbox={self.current_mailbox}",
+            connection.expunge,
+        )
         if status != "OK":
             raise RuntimeError(f"failed to expunge mailbox '{self.current_mailbox}': {data}")
         if self.current_mailbox is not None:
@@ -255,14 +275,22 @@ class IMAPSession:
     def _ensure_target_mailbox(self, mailbox: str, create_missing_mailboxes: bool) -> str:
         connection = self._require_connection()
         resolved_mailbox = resolve_mailbox_name(self.account, mailbox)
-        status, data = connection.list("", resolved_mailbox)
+        status, data = _run_imap_command(
+            "LIST",
+            f"mailbox={resolved_mailbox}",
+            lambda: connection.list("", resolved_mailbox),
+        )
         if status == "OK" and any(item for item in data if item):
             self._freeze_mailbox_snapshot(resolved_mailbox, need_uidvalidity=False)
             return resolved_mailbox
         if not create_missing_mailboxes:
             raise RuntimeError(f"target mailbox does not exist: {resolved_mailbox}")
 
-        create_status, create_data = connection.create(resolved_mailbox)
+        create_status, create_data = _run_imap_command(
+            "CREATE",
+            f"mailbox={resolved_mailbox}",
+            lambda: connection.create(resolved_mailbox),
+        )
         if create_status != "OK":
             raise RuntimeError(f"failed to create mailbox '{resolved_mailbox}': {create_data}")
         self._freeze_mailbox_snapshot(resolved_mailbox, need_uidvalidity=False)
@@ -363,7 +391,11 @@ class IMAPSession:
         if cached is not None:
             return list(cached)
 
-        status, data = connection.uid("search", None, *bounded_terms)
+        status, data = _run_imap_command(
+            "UID SEARCH",
+            f"mailbox={self.current_mailbox} terms={bounded_terms!r}",
+            lambda: connection.uid("search", None, *bounded_terms),
+        )
         if status != "OK":
             raise RuntimeError(f"failed to search mailbox '{self.current_mailbox}': {data}")
 
@@ -384,7 +416,11 @@ class IMAPSession:
         connection = self._require_connection()
         append_flags = _format_flag_list(sorted(message.flags))
         append_date = imaplib.Time2Internaldate(message.internal_date)
-        status, data = connection.append(target_mailbox, append_flags, append_date, message.raw_message)
+        status, data = _run_imap_command(
+            "APPEND",
+            f"mailbox={target_mailbox} flags={append_flags!r} size={len(message.raw_message)}",
+            lambda: connection.append(target_mailbox, append_flags, append_date, message.raw_message),
+        )
         if status != "OK":
             raise RuntimeError(f"failed to append message UID {message.uid} to mailbox '{target_mailbox}': {data}")
         self.appended_messages_by_mailbox.setdefault(target_mailbox, []).append(message.raw_message)
@@ -392,7 +428,11 @@ class IMAPSession:
 
     def _uid_command(self, command: str, *args: str) -> None:
         connection = self._require_connection()
-        status, data = connection.uid(command, *args)
+        status, data = _run_imap_command(
+            f"UID {command.upper()}",
+            f"mailbox={self.current_mailbox} args={args!r}",
+            lambda: connection.uid(command, *args),
+        )
         if status != "OK":
             raise RuntimeError(f"IMAP UID {command.upper()} failed for {args}: {data}")
 
@@ -482,7 +522,11 @@ def _read_uid_horizon(
         return max(uidnext - 1, 0)
 
     if getattr(connection, "state", None) == "SELECTED":
-        status, data = connection.uid("search", None, "ALL")
+        status, data = _run_imap_command(
+            "UID SEARCH",
+            f"mailbox={mailbox} terms={('ALL',)!r}",
+            lambda: connection.uid("search", None, "ALL"),
+        )
         if status != "OK":
             raise RuntimeError(f"failed to determine UID horizon for mailbox '{mailbox}': {data}")
         raw = data[0] if data and data[0] else b""
@@ -498,7 +542,11 @@ def _uidvalidity_candidates(
 ) -> list[bytes | str]:
     del mailbox
     candidates: list[bytes | str] = []
-    status, data = connection.response("UIDVALIDITY")
+    status, data = _run_imap_command(
+        "RESPONSE",
+        "code=UIDVALIDITY",
+        lambda: connection.response("UIDVALIDITY"),
+    )
     if status == "OK" and data:
         candidates.extend(item for item in data if item is not None)
 
@@ -516,10 +564,30 @@ def _read_status_values(
     keys: set[str],
 ) -> dict[str, int]:
     query = f"({' '.join(sorted(keys))})"
-    status, data = connection.status(mailbox, query)
+    status, data = _run_imap_command(
+        "STATUS",
+        f"mailbox={mailbox} query={query}",
+        lambda: connection.status(mailbox, query),
+    )
     if status != "OK":
         return {}
     return _parse_status_values(data, keys)
+
+
+def _run_imap_command(command: str, detail: str, operation):
+    suffix = f" {detail}" if detail else ""
+    LOGGER.debug("IMAP command start: %s%s", command, suffix)
+    result = operation()
+    LOGGER.debug("IMAP command complete: %s%s -> %s", command, suffix, _summarize_imap_result(result))
+    return result
+
+
+def _summarize_imap_result(result: object) -> str:
+    if isinstance(result, tuple) and len(result) == 2:
+        status, data = result
+        data_summary = f"{len(data)} item(s)" if isinstance(data, list) else repr(data)
+        return f"status={status!r} data={data_summary}"
+    return "ok"
 
 
 def _parse_status_values(data: object, keys: set[str]) -> dict[str, int]:

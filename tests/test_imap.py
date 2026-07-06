@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
+import logging
 
 import mail_custodian.imap_client
 from mail_custodian.imap_client import COPY_ID_HEADER, IMAPSession
@@ -352,6 +353,19 @@ def test_select_mailbox_reads_uidvalidity_only_when_requested() -> None:
     assert session.current_uidvalidity is None
     assert session.mailbox_uid_horizons["INBOX"] == 0
     assert session.connection.status_calls == [("INBOX", "(UIDNEXT)")]
+
+
+def test_select_mailbox_logs_imap_command_start_and_completion(caplog) -> None:
+    session = _build_session()
+    session.current_mailbox = None
+
+    with caplog.at_level(logging.DEBUG, logger="mail_custodian.imap_client"):
+        session.select_mailbox("INBOX", need_uidvalidity=False)
+
+    assert "IMAP command start: SELECT mailbox=INBOX" in caplog.text
+    assert "IMAP command complete: SELECT mailbox=INBOX" in caplog.text
+    assert "IMAP command start: STATUS mailbox=INBOX query=(UIDNEXT)" in caplog.text
+    assert "IMAP command complete: STATUS mailbox=INBOX query=(UIDNEXT)" in caplog.text
 
 
 def test_select_mailbox_falls_back_to_status_for_uidvalidity() -> None:
