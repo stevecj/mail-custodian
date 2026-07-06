@@ -209,6 +209,7 @@ def _build_session(name: str = "test") -> IMAPSession:
     session.mailbox_uid_horizons = {}
     session.mailbox_uidvalidities = {}
     session.appended_messages_by_mailbox = {}
+    session.search_result_cache = {}
     return session
 
 
@@ -372,6 +373,36 @@ def test_list_uids_ignores_messages_added_after_mailbox_horizon() -> None:
     session.connection.add_message("INBOX", _build_message(uid="2").raw_message, uid="2")
 
     assert session.list_uids() == ["1"]
+
+
+def test_search_uids_uses_in_memory_cache_for_repeated_query() -> None:
+    session = _build_session()
+    session.connection.add_message("INBOX", _build_message(uid="1").raw_message, uid="1")
+    session.current_mailbox = None
+    session.select_mailbox("INBOX")
+    initial_search_calls = len([call for call in session.connection.uid_calls if call[0] == "search"])
+
+    first = session.search_uids(Criteria())
+    second = session.search_uids(Criteria())
+
+    search_calls = [call for call in session.connection.uid_calls if call[0] == "search"]
+    assert first == ["1"]
+    assert second == ["1"]
+    assert len(search_calls) == initial_search_calls + 1
+
+
+def test_search_cache_is_invalidated_when_mailbox_changes() -> None:
+    session = _build_session()
+    session.connection.add_message("INBOX", _build_message(uid="1").raw_message, uid="1")
+    session.current_mailbox = None
+    session.select_mailbox("INBOX")
+
+    session.search_uids(Criteria())
+    session._store_flags("1", operation="+FLAGS.SILENT", flags=["\\Seen"])
+    session.search_uids(Criteria())
+
+    search_calls = [call for call in session.connection.uid_calls if call[0] == "search"]
+    assert len(search_calls) == 2
 
 
 def test_copy_duplicate_check_ignores_messages_added_after_first_touch() -> None:

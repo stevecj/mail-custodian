@@ -27,6 +27,7 @@ class IMAPSession:
         self.mailbox_uid_horizons: dict[str, int] = {}
         self.mailbox_uidvalidities: dict[str, int] = {}
         self.appended_messages_by_mailbox: dict[str, list[bytes]] = {}
+        self.search_result_cache: dict[tuple[str, tuple[str, ...]], tuple[str, ...]] = {}
 
     def __enter__(self) -> "IMAPSession":
         if self.account.ssl:
@@ -220,6 +221,8 @@ class IMAPSession:
         status, data = connection.expunge()
         if status != "OK":
             raise RuntimeError(f"failed to expunge mailbox '{self.current_mailbox}': {data}")
+        if self.current_mailbox is not None:
+            self._invalidate_mailbox_search_cache(self.current_mailbox)
 
     def _build_search_terms(self, criteria: Criteria) -> list[str]:
         terms = ["UNDELETED"]
@@ -291,9 +294,13 @@ class IMAPSession:
 
         if "MOVE" in self.capabilities:
             self._uid_command("move", message.uid, resolved_target_mailbox)
+            if self.current_mailbox is not None:
+                self._invalidate_mailbox_search_cache(self.current_mailbox)
+            self._invalidate_mailbox_search_cache(resolved_target_mailbox)
             return False
 
         self._uid_command("copy", message.uid, resolved_target_mailbox)
+        self._invalidate_mailbox_search_cache(resolved_target_mailbox)
         self._store_flags(message.uid, operation="+FLAGS.SILENT", flags=["\\Deleted"])
         return True
 
@@ -348,18 +355,30 @@ class IMAPSession:
         bounded_terms = self._bound_search_terms_to_current_horizon(search_terms)
         if bounded_terms is None:
             return []
+        if self.current_mailbox is None:
+            raise RuntimeError("mailbox must be selected before searching")
+
+        cache_key = (self.current_mailbox, tuple(bounded_terms))
+        cached = self.search_result_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
         status, data = connection.uid("search", None, *bounded_terms)
         if status != "OK":
             raise RuntimeError(f"failed to search mailbox '{self.current_mailbox}': {data}")
 
         raw = data[0] if data and data[0] else b""
         if isinstance(raw, bytes):
-            return [item for item in raw.decode("ascii", errors="ignore").split() if item]
+            result = tuple(item for item in raw.decode("ascii", errors="ignore").split() if item)
+            self.search_result_cache[cache_key] = result
+            return list(result)
         return []
 
     def _store_flags(self, uid: str, *, operation: str, flags: list[str]) -> None:
         flag_list = _format_flag_list(flags)
         self._uid_command("store", uid, operation, flag_list)
+        if self.current_mailbox is not None:
+            self._invalidate_mailbox_search_cache(self.current_mailbox)
 
     def _append_message(self, target_mailbox: str, message: MessageData) -> None:
         connection = self._require_connection()
@@ -369,6 +388,7 @@ class IMAPSession:
         if status != "OK":
             raise RuntimeError(f"failed to append message UID {message.uid} to mailbox '{target_mailbox}': {data}")
         self.appended_messages_by_mailbox.setdefault(target_mailbox, []).append(message.raw_message)
+        self._invalidate_mailbox_search_cache(target_mailbox)
 
     def _uid_command(self, command: str, *args: str) -> None:
         connection = self._require_connection()
@@ -420,6 +440,11 @@ class IMAPSession:
         if horizon < 1:
             return None
         return [*search_terms, "UID", f"1:{horizon}"]
+
+    def _invalidate_mailbox_search_cache(self, mailbox: str) -> None:
+        stale_keys = [key for key in self.search_result_cache if key[0] == mailbox]
+        for key in stale_keys:
+            del self.search_result_cache[key]
 
 
 def _parse_flags(metadata: bytes) -> list[str]:
