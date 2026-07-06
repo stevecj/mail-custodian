@@ -47,8 +47,8 @@ class FilterEngine:
         grouped_rules = _group_rules_by_mailbox(account, account.rules)
         session = _get_session(account, sessions=sessions, exit_stack=exit_stack)
         for mailbox, rules in grouped_rules.items():
-            session.select_mailbox(mailbox)
             checkpointed_rules = [rule for rule in rules if rule.criteria.new_messages_only]
+            session.select_mailbox(mailbox, need_uidvalidity=bool(checkpointed_rules))
             checkpoint = self.checkpoint_store.get(account.name, mailbox) if checkpointed_rules else None
             uidvalidity = session.get_mailbox_uidvalidity() if checkpointed_rules else None
             since_uid = (

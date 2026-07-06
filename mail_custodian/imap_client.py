@@ -60,16 +60,18 @@ class IMAPSession:
         finally:
             self.connection = None
 
-    def select_mailbox(self, mailbox: str) -> None:
+    def select_mailbox(self, mailbox: str, *, need_uidvalidity: bool = False) -> None:
         connection = self._require_connection()
         resolved_mailbox = resolve_mailbox_name(self.account, mailbox)
         if self.current_mailbox == resolved_mailbox:
+            if need_uidvalidity and self.current_uidvalidity is None:
+                self.current_uidvalidity = _read_uidvalidity(connection, resolved_mailbox)
             return
         status, data = connection.select(resolved_mailbox)
         if status != "OK":
             raise RuntimeError(f"failed to select mailbox '{resolved_mailbox}': {data}")
         self.current_mailbox = resolved_mailbox
-        self.current_uidvalidity = _read_uidvalidity(connection, resolved_mailbox)
+        self.current_uidvalidity = _read_uidvalidity(connection, resolved_mailbox) if need_uidvalidity else None
 
     def get_mailbox_uidvalidity(self) -> int:
         if self.current_uidvalidity is None:
@@ -371,15 +373,49 @@ def _read_uidvalidity(
     connection: imaplib.IMAP4 | imaplib.IMAP4_SSL,
     mailbox: str,
 ) -> int:
-    status, data = connection.response("UIDVALIDITY")
-    if status != "OK" or not data or data[0] is None:
-        raise RuntimeError(f"failed to read UIDVALIDITY for mailbox '{mailbox}'")
+    for raw_value in _uidvalidity_candidates(connection, mailbox):
+        text = raw_value.decode("ascii", errors="ignore") if isinstance(raw_value, bytes) else str(raw_value)
+        if text.isdigit():
+            return int(text)
 
-    raw_value = data[0]
-    text = raw_value.decode("ascii", errors="ignore") if isinstance(raw_value, bytes) else str(raw_value)
-    if not text.isdigit():
-        raise RuntimeError(f"invalid UIDVALIDITY for mailbox '{mailbox}': {text!r}")
-    return int(text)
+    status, data = connection.status(mailbox, "(UIDVALIDITY)")
+    if status == "OK":
+        parsed = _parse_uidvalidity_status(data)
+        if parsed is not None:
+            return parsed
+
+    raise RuntimeError(f"failed to read UIDVALIDITY for mailbox '{mailbox}'")
+
+
+def _uidvalidity_candidates(
+    connection: imaplib.IMAP4 | imaplib.IMAP4_SSL,
+    mailbox: str,
+) -> list[bytes | str]:
+    del mailbox
+    candidates: list[bytes | str] = []
+    status, data = connection.response("UIDVALIDITY")
+    if status == "OK" and data:
+        candidates.extend(item for item in data if item is not None)
+
+    untagged = getattr(connection, "untagged_responses", {})
+    if isinstance(untagged, dict):
+        raw_values = untagged.get("UIDVALIDITY") or untagged.get(b"UIDVALIDITY")
+        if isinstance(raw_values, list):
+            candidates.extend(item for item in raw_values if item is not None)
+    return candidates
+
+
+def _parse_uidvalidity_status(data: object) -> int | None:
+    if not isinstance(data, list):
+        return None
+    for item in data:
+        if item is None:
+            continue
+        text = item.decode("ascii", errors="ignore") if isinstance(item, bytes) else str(item)
+        match = re.search(r"UIDVALIDITY\s+(\d+)", text)
+        if match:
+            return int(match.group(1))
+    return None
 
 
 def _parse_size(metadata: bytes) -> int:

@@ -17,9 +17,11 @@ class FakeConnection:
         self.mailboxes: dict[str, list[dict[str, object]]] = {"INBOX": []}
         self.uidvalidity_by_mailbox: dict[str, int] = {"INBOX": 999}
         self.selected_mailbox: str | None = None
+        self.response_uidvalidity_available = True
         self.uid_calls: list[tuple[str, tuple[str, ...]]] = []
         self.append_calls: list[tuple[str, str | None, str, bytes]] = []
         self._next_uid = 1
+        self.status_calls: list[tuple[str, str]] = []
 
     def uid(self, command: str, *args):
         self.uid_calls.append((command.lower(), tuple("" if arg is None else str(arg) for arg in args)))
@@ -39,7 +41,18 @@ class FakeConnection:
     def response(self, code: str):
         if code.upper() != "UIDVALIDITY" or self.selected_mailbox is None:
             return "NO", [None]
+        if not self.response_uidvalidity_available:
+            return "NO", [None]
         return "OK", [str(self.uidvalidity_by_mailbox[self.selected_mailbox]).encode()]
+
+    def status(self, mailbox: str, query: str):
+        self.status_calls.append((mailbox, query))
+        if query != "(UIDVALIDITY)":
+            return "NO", [b"unsupported"]
+        uidvalidity = self.uidvalidity_by_mailbox.get(mailbox)
+        if uidvalidity is None:
+            return "NO", [b"missing"]
+        return "OK", [f'"{mailbox}" (UIDVALIDITY {uidvalidity})'.encode()]
 
     def list(self, _reference: str, mailbox: str):
         if mailbox in self.mailboxes or mailbox in self.created_mailboxes:
@@ -169,6 +182,7 @@ def _build_session(name: str = "test") -> IMAPSession:
     session.connection = FakeConnection()
     session.capabilities = {"IMAP4REV1"}
     session.current_mailbox = "INBOX"
+    session.current_uidvalidity = None
     return session
 
 
@@ -300,6 +314,26 @@ def test_select_mailbox_resolves_root_mailbox_token() -> None:
 
     assert session.current_mailbox == "Mail.Review.Spam"
     assert session.connection.selected_mailbox == "Mail.Review.Spam"
+    assert session.current_uidvalidity is None
+
+
+def test_select_mailbox_reads_uidvalidity_only_when_requested() -> None:
+    session = _build_session()
+
+    session.select_mailbox("INBOX", need_uidvalidity=False)
+
+    assert session.current_uidvalidity is None
+    assert session.connection.status_calls == []
+
+
+def test_select_mailbox_falls_back_to_status_for_uidvalidity() -> None:
+    session = _build_session()
+    session.connection.response_uidvalidity_available = False
+
+    session.select_mailbox("INBOX", need_uidvalidity=True)
+
+    assert session.current_uidvalidity == 999
+    assert session.connection.status_calls == [("INBOX", "(UIDVALIDITY)")]
 
 
 def test_apply_actions_forwards_message(monkeypatch) -> None:
