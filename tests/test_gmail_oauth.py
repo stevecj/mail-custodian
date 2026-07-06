@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 
-from mail_custodian.gmail_oauth import build_xoauth2_response, refresh_access_token
+import mail_custodian.gmail_oauth
+from mail_custodian.gmail_oauth import _AuthorizationResponse, authorize_account, build_xoauth2_response, refresh_access_token
 from mail_custodian.models import AccountConfig, GmailOAuthConfig
 from mail_custodian.state import GmailOAuthStore
 
@@ -52,3 +53,44 @@ def test_refresh_access_token_uses_stored_refresh_token(monkeypatch, tmp_path) -
     )
 
     assert refresh_access_token(account, token_store=store) == "fresh-access-token"
+
+
+def test_authorize_account_stores_refresh_token(monkeypatch, tmp_path) -> None:
+    store = GmailOAuthStore(tmp_path / "gmail-oauth.json")
+
+    monkeypatch.setattr(
+        mail_custodian.gmail_oauth,
+        "_await_browser_callback",
+        lambda account, *, state, code_challenge: _AuthorizationResponse(code="auth-code", state=state),
+    )
+    monkeypatch.setattr(
+        mail_custodian.gmail_oauth,
+        "_last_redirect_uri",
+        lambda: "http://127.0.0.1:43123/",
+    )
+
+    def fake_post_form(url: str, fields: dict[str, str]) -> dict[str, object]:
+        assert url == "https://oauth2.googleapis.com/token"
+        assert fields["client_id"] == "desktop-client-id"
+        assert fields["client_secret"] == "desktop-client-secret"
+        assert fields["code"] == "auth-code"
+        assert fields["grant_type"] == "authorization_code"
+        assert fields["redirect_uri"] == "http://127.0.0.1:43123/"
+        assert fields["code_verifier"]
+        return {"refresh_token": "new-refresh-token"}
+
+    monkeypatch.setattr(mail_custodian.gmail_oauth, "_post_form", fake_post_form)
+
+    account = AccountConfig(
+        name="gmail",
+        host="imap.gmail.com",
+        username="person@gmail.com",
+        provider="gmail",
+        gmail_oauth=GmailOAuthConfig(
+            client_id="desktop-client-id",
+            client_secret="desktop-client-secret",
+        ),
+    )
+
+    assert authorize_account(account, token_store=store) == "new-refresh-token"
+    assert GmailOAuthStore(tmp_path / "gmail-oauth.json").get("gmail") == "new-refresh-token"

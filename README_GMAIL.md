@@ -68,8 +68,8 @@ Before starting, make sure all of the following are true:
 
 1. Open the Google Auth Platform clients page:
    <https://console.developers.google.com/auth/clients>
-2. If Google asks you to choose a project, either select an existing one or
-   create a new project for Mail Custodian.
+2. If Google asks you to choose a project or doesn't ask anything, then either
+   select an existing project or create a new one for Mail Custodian.
 3. If Google says the application must be registered before a client can be
    created, complete that registration step in the Google Auth Platform UI and
    then return to the clients page.

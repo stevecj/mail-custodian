@@ -60,6 +60,7 @@ def refresh_access_token(account: AccountConfig, *, token_store: GmailOAuthStore
 
 
 def authorize_account(account: AccountConfig, *, token_store: GmailOAuthStore | None = None) -> str:
+    oauth = _require_gmail_oauth(account)
     state = secrets.token_urlsafe(24)
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode("ascii")).digest()).decode("ascii")
