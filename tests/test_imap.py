@@ -16,6 +16,7 @@ class FakeConnection:
         self.created_mailboxes: set[str] = set()
         self.mailboxes: dict[str, list[dict[str, object]]] = {"INBOX": []}
         self.uidvalidity_by_mailbox: dict[str, int] = {"INBOX": 999}
+        self.uidnext_by_mailbox: dict[str, int] = {"INBOX": 1}
         self.selected_mailbox: str | None = None
         self.response_uidvalidity_available = True
         self.uid_calls: list[tuple[str, tuple[str, ...]]] = []
@@ -36,6 +37,8 @@ class FakeConnection:
         self.selected_mailbox = mailbox
         self.mailboxes.setdefault(mailbox, [])
         self.uidvalidity_by_mailbox.setdefault(mailbox, 999)
+        self.uidnext_by_mailbox.setdefault(mailbox, self._next_uid)
+        self.state = "SELECTED"
         return "OK", [b""]
 
     def response(self, code: str):
@@ -47,15 +50,23 @@ class FakeConnection:
 
     def status(self, mailbox: str, query: str):
         self.status_calls.append((mailbox, query))
-        if query != "(UIDVALIDITY)":
-            return "NO", [b"unsupported"]
         uidvalidity = self.uidvalidity_by_mailbox.get(mailbox)
-        if uidvalidity is None:
+        uidnext = self.uidnext_by_mailbox.get(mailbox)
+        if uidvalidity is None or uidnext is None:
             return "NO", [b"missing"]
-        return "OK", [f'"{mailbox}" (UIDVALIDITY {uidvalidity})'.encode()]
+        parts: list[str] = []
+        if "UIDVALIDITY" in query:
+            parts.append(f"UIDVALIDITY {uidvalidity}")
+        if "UIDNEXT" in query:
+            parts.append(f"UIDNEXT {uidnext}")
+        if not parts:
+            return "NO", [b"unsupported"]
+        return "OK", [f'"{mailbox}" ({" ".join(parts)})'.encode()]
 
     def list(self, _reference: str, mailbox: str):
         if mailbox in self.mailboxes or mailbox in self.created_mailboxes:
+            self.uidvalidity_by_mailbox.setdefault(mailbox, 999)
+            self.uidnext_by_mailbox.setdefault(mailbox, self._next_uid)
             return "OK", [f'() "/" "{mailbox}"'.encode()]
         return "OK", [None]
 
@@ -63,18 +74,21 @@ class FakeConnection:
         self.created_mailboxes.add(mailbox)
         self.mailboxes.setdefault(mailbox, [])
         self.uidvalidity_by_mailbox.setdefault(mailbox, 999)
+        self.uidnext_by_mailbox.setdefault(mailbox, 1)
         return "OK", [b"created"]
 
     def append(self, mailbox: str, flags: str | None, date_time: str, message: bytes):
+        assigned_uid = str(self._next_uid)
         self.mailboxes.setdefault(mailbox, []).append(
             {
-                "uid": str(self._next_uid),
+                "uid": assigned_uid,
                 "flags": flags or "",
                 "date_time": date_time,
                 "message": message,
             }
         )
         self._next_uid += 1
+        self.uidnext_by_mailbox[mailbox] = self._next_uid
         self.append_calls.append((mailbox, flags, date_time, message))
         return "OK", [b"appended"]
 
@@ -95,9 +109,12 @@ class FakeConnection:
                 "message": message,
             }
         )
+        self.uidnext_by_mailbox[mailbox] = max(self.uidnext_by_mailbox.get(mailbox, 1), int(uid or self._next_uid))
         if uid is None:
             self._next_uid += 1
+            self.uidnext_by_mailbox[mailbox] = self._next_uid
             return str(self._next_uid - 1)
+        self.uidnext_by_mailbox[mailbox] = max(self.uidnext_by_mailbox.get(mailbox, 1), int(uid) + 1)
         return uid
 
     def _uid_search(self, _charset, *criteria: str):
@@ -105,6 +122,7 @@ class FakeConnection:
             return "NO", [b"no mailbox selected"]
         records = self.mailboxes.get(self.selected_mailbox, [])
         minimum_uid = 0
+        maximum_uid: int | None = None
         header_terms: list[tuple[str, str]] = []
         index = 0
         while index < len(criteria):
@@ -117,8 +135,9 @@ class FakeConnection:
                 continue
             if term == "UID":
                 range_value = criteria[index + 1]
-                start_text, _, _ = range_value.partition(":")
+                start_text, _, end_text = range_value.partition(":")
                 minimum_uid = int(start_text)
+                maximum_uid = int(end_text) if end_text and end_text != "*" else None
                 index += 2
                 continue
             if term == "HEADER":
@@ -129,7 +148,10 @@ class FakeConnection:
 
         matches: list[str] = []
         for record in records:
-            if int(str(record["uid"])) < minimum_uid:
+            uid_value = int(str(record["uid"]))
+            if uid_value < minimum_uid:
+                continue
+            if maximum_uid is not None and uid_value > maximum_uid:
                 continue
             message = BytesParser(policy=policy.default).parsebytes(record["message"])
             if _matches_search(message, tuple(header_terms)):
@@ -158,6 +180,7 @@ class FakeConnection:
 
     def logout(self) -> None:
         self.logged_out = True
+        self.state = "LOGOUT"
 
 
 def _matches_search(message: EmailMessage, criteria: tuple[tuple[str, str], ...]) -> bool:
@@ -183,6 +206,9 @@ def _build_session(name: str = "test") -> IMAPSession:
     session.capabilities = {"IMAP4REV1"}
     session.current_mailbox = "INBOX"
     session.current_uidvalidity = None
+    session.mailbox_uid_horizons = {}
+    session.mailbox_uidvalidities = {}
+    session.appended_messages_by_mailbox = {}
     return session
 
 
@@ -323,7 +349,8 @@ def test_select_mailbox_reads_uidvalidity_only_when_requested() -> None:
     session.select_mailbox("INBOX", need_uidvalidity=False)
 
     assert session.current_uidvalidity is None
-    assert session.connection.status_calls == []
+    assert session.mailbox_uid_horizons["INBOX"] == 0
+    assert session.connection.status_calls == [("INBOX", "(UIDNEXT)")]
 
 
 def test_select_mailbox_falls_back_to_status_for_uidvalidity() -> None:
@@ -333,7 +360,30 @@ def test_select_mailbox_falls_back_to_status_for_uidvalidity() -> None:
     session.select_mailbox("INBOX", need_uidvalidity=True)
 
     assert session.current_uidvalidity == 999
-    assert session.connection.status_calls == [("INBOX", "(UIDVALIDITY)")]
+    assert session.mailbox_uid_horizons["INBOX"] == 0
+    assert session.connection.status_calls == [("INBOX", "(UIDNEXT)"), ("INBOX", "(UIDVALIDITY)")]
+
+
+def test_list_uids_ignores_messages_added_after_mailbox_horizon() -> None:
+    session = _build_session()
+    session.connection.add_message("INBOX", _build_message(uid="1").raw_message, uid="1")
+    session.current_mailbox = None
+    session.select_mailbox("INBOX")
+    session.connection.add_message("INBOX", _build_message(uid="2").raw_message, uid="2")
+
+    assert session.list_uids() == ["1"]
+
+
+def test_copy_duplicate_check_ignores_messages_added_after_first_touch() -> None:
+    session = _build_session()
+    message = _build_message(message_id=None)
+    session.connection.add_message("Archive/Review", _build_message(uid="1", message_id=None, body="existing").raw_message, uid="1")
+    session.connection.uidnext_by_mailbox["Archive/Review"] = 2
+    session.connection.uidvalidity_by_mailbox["Archive/Review"] = 999
+    session._ensure_target_mailbox("Archive/Review", create_missing_mailboxes=False)
+    session.connection.add_message("Archive/Review", message.raw_message, uid="2")
+
+    assert session._mailbox_contains_duplicate("Archive/Review", message) is False
 
 
 def test_apply_actions_forwards_message(monkeypatch) -> None:

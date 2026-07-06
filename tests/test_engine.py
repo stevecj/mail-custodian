@@ -28,6 +28,7 @@ class FakeSession:
         self.list_uids_calls: list[int | None] = []
         self.search_uids_calls: list[int | None] = []
         self.apply_calls: list[dict[str, object]] = []
+        self.horizons_by_mailbox: dict[str, int] = {"INBOX": 7}
         FakeSession.instances[account.name] = self
 
     def __enter__(self) -> "FakeSession":
@@ -41,6 +42,9 @@ class FakeSession:
 
     def get_mailbox_uidvalidity(self) -> int:
         return 999
+
+    def mailbox_uid_horizon(self, mailbox: str) -> int:
+        return self.horizons_by_mailbox[mailbox]
 
     def list_uids(self, *, since_uid: int | None = None) -> list[str]:
         self.list_uids_calls.append(since_uid)

@@ -24,6 +24,9 @@ class IMAPSession:
         self.capabilities: set[str] = set()
         self.current_mailbox: str | None = None
         self.current_uidvalidity: int | None = None
+        self.mailbox_uid_horizons: dict[str, int] = {}
+        self.mailbox_uidvalidities: dict[str, int] = {}
+        self.appended_messages_by_mailbox: dict[str, list[bytes]] = {}
 
     def __enter__(self) -> "IMAPSession":
         if self.account.ssl:
@@ -64,14 +67,16 @@ class IMAPSession:
         connection = self._require_connection()
         resolved_mailbox = resolve_mailbox_name(self.account, mailbox)
         if self.current_mailbox == resolved_mailbox:
-            if need_uidvalidity and self.current_uidvalidity is None:
-                self.current_uidvalidity = _read_uidvalidity(connection, resolved_mailbox)
+            self._freeze_mailbox_snapshot(resolved_mailbox, need_uidvalidity=need_uidvalidity)
+            if need_uidvalidity:
+                self.current_uidvalidity = self.mailbox_uidvalidities.get(resolved_mailbox)
             return
         status, data = connection.select(resolved_mailbox)
         if status != "OK":
             raise RuntimeError(f"failed to select mailbox '{resolved_mailbox}': {data}")
         self.current_mailbox = resolved_mailbox
-        self.current_uidvalidity = _read_uidvalidity(connection, resolved_mailbox) if need_uidvalidity else None
+        self._freeze_mailbox_snapshot(resolved_mailbox, need_uidvalidity=need_uidvalidity)
+        self.current_uidvalidity = self.mailbox_uidvalidities.get(resolved_mailbox) if need_uidvalidity else None
 
     def get_mailbox_uidvalidity(self) -> int:
         if self.current_uidvalidity is None:
@@ -80,14 +85,20 @@ class IMAPSession:
 
     def list_uids(self, *, since_uid: int | None = None) -> list[str]:
         terms = ["ALL"]
-        if since_uid is not None:
-            terms.extend(["UID", f"{since_uid + 1}:*"])
+        uid_range = self._selected_mailbox_uid_range(since_uid=since_uid)
+        if uid_range == "":
+            return []
+        if uid_range is not None:
+            terms.extend(["UID", uid_range])
         return self._search_selected_mailbox_uids(terms)
 
     def search_uids(self, criteria: Criteria, *, since_uid: int | None = None) -> list[str]:
         terms = self._build_search_terms(criteria)
-        if since_uid is not None:
-            terms.extend(["UID", f"{since_uid + 1}:*"])
+        uid_range = self._selected_mailbox_uid_range(since_uid=since_uid)
+        if uid_range == "":
+            return []
+        if uid_range is not None:
+            terms.extend(["UID", uid_range])
         return self._search_selected_mailbox_uids(terms)
 
     def fetch_message(self, uid: str) -> MessageData:
@@ -243,6 +254,7 @@ class IMAPSession:
         resolved_mailbox = resolve_mailbox_name(self.account, mailbox)
         status, data = connection.list("", resolved_mailbox)
         if status == "OK" and any(item for item in data if item):
+            self._freeze_mailbox_snapshot(resolved_mailbox, need_uidvalidity=False)
             return resolved_mailbox
         if not create_missing_mailboxes:
             raise RuntimeError(f"target mailbox does not exist: {resolved_mailbox}")
@@ -250,6 +262,7 @@ class IMAPSession:
         create_status, create_data = connection.create(resolved_mailbox)
         if create_status != "OK":
             raise RuntimeError(f"failed to create mailbox '{resolved_mailbox}': {create_data}")
+        self._freeze_mailbox_snapshot(resolved_mailbox, need_uidvalidity=False)
         return resolved_mailbox
 
     def _copy_message(self, message: MessageData, target_mailbox: str, *, create_missing_mailboxes: bool) -> None:
@@ -309,6 +322,10 @@ class IMAPSession:
         return True
 
     def _mailbox_contains_duplicate(self, mailbox: str, message: MessageData) -> bool:
+        for appended_raw_message in self.appended_messages_by_mailbox.get(mailbox, []):
+            if _canonical_message_bytes(appended_raw_message) == _canonical_message_bytes(message.raw_message):
+                return True
+
         search_terms = _candidate_search_terms(message)
         if not search_terms:
             return False
@@ -328,7 +345,10 @@ class IMAPSession:
 
     def _search_selected_mailbox_uids(self, search_terms: list[str]) -> list[str]:
         connection = self._require_connection()
-        status, data = connection.uid("search", None, *search_terms)
+        bounded_terms = self._bound_search_terms_to_current_horizon(search_terms)
+        if bounded_terms is None:
+            return []
+        status, data = connection.uid("search", None, *bounded_terms)
         if status != "OK":
             raise RuntimeError(f"failed to search mailbox '{self.current_mailbox}': {data}")
 
@@ -348,6 +368,7 @@ class IMAPSession:
         status, data = connection.append(target_mailbox, append_flags, append_date, message.raw_message)
         if status != "OK":
             raise RuntimeError(f"failed to append message UID {message.uid} to mailbox '{target_mailbox}': {data}")
+        self.appended_messages_by_mailbox.setdefault(target_mailbox, []).append(message.raw_message)
 
     def _uid_command(self, command: str, *args: str) -> None:
         connection = self._require_connection()
@@ -359,6 +380,46 @@ class IMAPSession:
         if not self.connection:
             raise RuntimeError("IMAP session is not connected")
         return self.connection
+
+    def mailbox_uid_horizon(self, mailbox: str) -> int:
+        resolved_mailbox = resolve_mailbox_name(self.account, mailbox)
+        horizon = self.mailbox_uid_horizons.get(resolved_mailbox)
+        if horizon is None:
+            raise RuntimeError(f"UID horizon is unavailable for mailbox '{resolved_mailbox}'")
+        return horizon
+
+    def _freeze_mailbox_snapshot(self, mailbox: str, *, need_uidvalidity: bool) -> None:
+        if mailbox not in self.mailbox_uid_horizons:
+            connection = self._require_connection()
+            horizon = _read_uid_horizon(connection, mailbox)
+            self.mailbox_uid_horizons[mailbox] = horizon
+        if need_uidvalidity and mailbox not in self.mailbox_uidvalidities:
+            connection = self._require_connection()
+            self.mailbox_uidvalidities[mailbox] = _read_uidvalidity(connection, mailbox)
+
+    def _selected_mailbox_uid_range(self, *, since_uid: int | None) -> str | None:
+        if self.current_mailbox is None:
+            return None
+        horizon = self.mailbox_uid_horizons.get(self.current_mailbox)
+        if horizon is None:
+            return None
+        start_uid = 1 if since_uid is None else since_uid + 1
+        if start_uid > horizon:
+            return ""
+        return f"{start_uid}:{horizon}"
+
+    def _bound_search_terms_to_current_horizon(self, search_terms: list[str]) -> list[str] | None:
+        if self.current_mailbox is None:
+            return list(search_terms)
+        if "UID" in search_terms:
+            return list(search_terms)
+
+        horizon = self.mailbox_uid_horizons.get(self.current_mailbox)
+        if horizon is None:
+            return list(search_terms)
+        if horizon < 1:
+            return None
+        return [*search_terms, "UID", f"1:{horizon}"]
 
 
 def _parse_flags(metadata: bytes) -> list[str]:
@@ -373,18 +434,37 @@ def _read_uidvalidity(
     connection: imaplib.IMAP4 | imaplib.IMAP4_SSL,
     mailbox: str,
 ) -> int:
+    status_map = _read_status_values(connection, mailbox, {"UIDVALIDITY"})
+    status_uidvalidity = status_map.get("UIDVALIDITY")
+    if status_uidvalidity is not None:
+        return status_uidvalidity
+
     for raw_value in _uidvalidity_candidates(connection, mailbox):
         text = raw_value.decode("ascii", errors="ignore") if isinstance(raw_value, bytes) else str(raw_value)
         if text.isdigit():
             return int(text)
 
-    status, data = connection.status(mailbox, "(UIDVALIDITY)")
-    if status == "OK":
-        parsed = _parse_uidvalidity_status(data)
-        if parsed is not None:
-            return parsed
-
     raise RuntimeError(f"failed to read UIDVALIDITY for mailbox '{mailbox}'")
+
+
+def _read_uid_horizon(
+    connection: imaplib.IMAP4 | imaplib.IMAP4_SSL,
+    mailbox: str,
+) -> int:
+    status_map = _read_status_values(connection, mailbox, {"UIDNEXT"})
+    uidnext = status_map.get("UIDNEXT")
+    if uidnext is not None:
+        return max(uidnext - 1, 0)
+
+    if getattr(connection, "state", None) == "SELECTED":
+        status, data = connection.uid("search", None, "ALL")
+        if status != "OK":
+            raise RuntimeError(f"failed to determine UID horizon for mailbox '{mailbox}': {data}")
+        raw = data[0] if data and data[0] else b""
+        if isinstance(raw, bytes):
+            uids = [int(item) for item in raw.decode("ascii", errors="ignore").split() if item]
+            return max(uids, default=0)
+    raise RuntimeError(f"failed to determine UID horizon for mailbox '{mailbox}'")
 
 
 def _uidvalidity_candidates(
@@ -405,17 +485,31 @@ def _uidvalidity_candidates(
     return candidates
 
 
-def _parse_uidvalidity_status(data: object) -> int | None:
+def _read_status_values(
+    connection: imaplib.IMAP4 | imaplib.IMAP4_SSL,
+    mailbox: str,
+    keys: set[str],
+) -> dict[str, int]:
+    query = f"({' '.join(sorted(keys))})"
+    status, data = connection.status(mailbox, query)
+    if status != "OK":
+        return {}
+    return _parse_status_values(data, keys)
+
+
+def _parse_status_values(data: object, keys: set[str]) -> dict[str, int]:
     if not isinstance(data, list):
-        return None
+        return {}
+    parsed: dict[str, int] = {}
     for item in data:
         if item is None:
             continue
         text = item.decode("ascii", errors="ignore") if isinstance(item, bytes) else str(item)
-        match = re.search(r"UIDVALIDITY\s+(\d+)", text)
-        if match:
-            return int(match.group(1))
-    return None
+        for key in keys:
+            match = re.search(rf"{key}\s+(\d+)", text)
+            if match:
+                parsed[key] = int(match.group(1))
+    return parsed
 
 
 def _parse_size(metadata: bytes) -> int:

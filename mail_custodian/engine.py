@@ -124,7 +124,7 @@ class FilterEngine:
             if expunge_needed and not self.dry_run:
                 session.expunge()
             if checkpointed_rules and not self.dry_run and uidvalidity is not None:
-                last_uid = max((int(uid) for uid in pending_uids), default=(since_uid or 0))
+                last_uid = session.mailbox_uid_horizon(mailbox)
                 self.checkpoint_store.put(
                     account.name,
                     mailbox,
