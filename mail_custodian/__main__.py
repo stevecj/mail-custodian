@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from . import __version__
@@ -32,6 +34,18 @@ def main() -> int:
         except (GmailOAuthError, StateError) as exc:
             print(f"Gmail authorization error: {exc}", file=sys.stderr)
             return 2
+
+    if args.account:
+        try:
+            config = replace(config, accounts=(_find_account(config, args.account),))
+        except ConfigError as exc:
+            print(f"Configuration error: {exc}", file=sys.stderr)
+            return 2
+    try:
+        config = _filter_rules(config, args.rule_patterns, auto_only=args.auto_only)
+    except ConfigError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
 
     log_level = "DEBUG" if args.verbose else config.log_level
     logging.basicConfig(
@@ -66,6 +80,22 @@ def _parse_args() -> argparse.Namespace:
         "--authorize-gmail",
         metavar="ACCOUNT",
         help="Authorize a Gmail account and store its refresh token, then exit.",
+    )
+    parser.add_argument(
+        "--account",
+        metavar="ACCOUNT",
+        help="Run rules only for the named account.",
+    )
+    parser.add_argument(
+        "--auto-only",
+        action="store_true",
+        help="Run only auto rules, even when rule-name regular expressions are provided.",
+    )
+    parser.add_argument(
+        "rule_patterns",
+        nargs="*",
+        metavar="RULE_REGEX",
+        help="Enable non-auto rules whose names fully match one or more regular expressions.",
     )
     parser.add_argument(
         "--config",
@@ -103,6 +133,38 @@ def _find_account(config, name: str):
         if account.name == name:
             return account
     raise ConfigError(f"unknown account: {name}")
+
+
+def _filter_rules(config, patterns: list[str], *, auto_only: bool):
+    compiled_patterns: list[re.Pattern[str]] = []
+    for pattern in patterns:
+        try:
+            compiled_patterns.append(re.compile(pattern))
+        except re.error as exc:
+            raise ConfigError(f"invalid rule name regular expression {pattern!r}: {exc}") from exc
+
+    return replace(
+        config,
+        accounts=tuple(
+            replace(
+                account,
+                rules=tuple(
+                    rule
+                    for rule in account.rules
+                    if _should_run_rule(rule, compiled_patterns, auto_only=auto_only)
+                ),
+            )
+            for account in config.accounts
+        ),
+    )
+
+
+def _should_run_rule(rule, compiled_patterns: list[re.Pattern[str]], *, auto_only: bool) -> bool:
+    if rule.auto:
+        return True
+    if auto_only:
+        return False
+    return any(compiled_pattern.fullmatch(rule.name) for compiled_pattern in compiled_patterns)
 
 
 if __name__ == "__main__":

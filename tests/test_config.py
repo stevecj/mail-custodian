@@ -142,6 +142,34 @@ def test_load_config_expands_shared_rules_into_target_accounts(tmp_path: Path) -
     assert [rule.name for rule in config.accounts[1].rules] == ["shared spam quarantine"]
 
 
+def test_load_config_parses_rule_auto_flag(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            accounts:
+              - name: personal
+                host: imap.personal.test
+                username: personal-user
+                password: personal-secret
+                rules:
+                  - name: automatic rule
+                    actions:
+                      mark_read: true
+                  - name: manual rule
+                    auto: false
+                    actions:
+                      mark_unread: true
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config([str(tmp_path / "config.yaml")])
+
+    assert config.accounts[0].rules[0].auto is True
+    assert config.accounts[0].rules[1].auto is False
+
+
 def test_load_config_expands_account_groups_with_merged_criteria(tmp_path: Path) -> None:
     (tmp_path / "config.yaml").write_text(
         textwrap.dedent(

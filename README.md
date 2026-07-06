@@ -199,6 +199,10 @@ shared_rule_groups:
 account's local `rules` and `groups` , and their member rule names also
 receive the ` (<group name>)` suffix.
 
+Each rule can also set `auto: false`. Rules marked that way are skipped during
+normal runs and only become eligible when their names are matched by positional
+rule-name regular expressions on the command line.
+
 ### Rule actions
 
 | Key                          | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -234,6 +238,24 @@ Dry run:
 
 ```bash
 mail-custodian --config config.yaml --dry-run --verbose
+```
+
+Run only one configured account:
+
+```bash
+mail-custodian --account personal
+```
+
+Enable non-auto rules whose names fully match one or more regular expressions:
+
+```bash
+mail-custodian 'flag .*' 'move coupons'
+```
+
+Run only auto rules, even if positional rule-name expressions are supplied:
+
+```bash
+mail-custodian --auto-only 'manual .*'
 ```
 
 ```bash

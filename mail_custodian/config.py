@@ -20,6 +20,7 @@ class _SharedRuleSpec:
     accounts: tuple[str, ...]
     name: str
     mailbox: str | None
+    auto: bool
     criteria: Criteria
     actions: Actions
 
@@ -258,6 +259,7 @@ def _build_rule(index: int, data: Any, default_mailbox: str, *, context: str = "
     return Rule(
         name=_require_string(mapping, "name", context),
         mailbox=_string_or_default(mapping.get("mailbox"), default_mailbox, f"{context}.mailbox"),
+        auto=_optional_bool(mapping.get("auto"), f"{context}.auto", default=True) is not False,
         criteria=_build_criteria(_ensure_mapping(mapping.get("criteria", {}), f"{context}.criteria")),
         actions=_build_actions(_ensure_mapping(mapping.get("actions", {}), f"{context}.actions"), context),
     )
@@ -300,6 +302,7 @@ def _build_shared_rule(index: int, data: Any) -> _SharedRuleSpec:
         accounts=accounts,
         name=_require_string(mapping, "name", context),
         mailbox=_optional_string(mapping.get("mailbox"), f"{context}.mailbox"),
+        auto=_optional_bool(mapping.get("auto"), f"{context}.auto", default=True) is not False,
         criteria=_build_criteria(_ensure_mapping(mapping.get("criteria", {}), f"{context}.criteria")),
         actions=_build_actions(_ensure_mapping(mapping.get("actions", {}), f"{context}.actions"), context),
     )
@@ -356,6 +359,7 @@ def _apply_shared_rules(
                 Rule(
                     name=shared_rule.name,
                     mailbox=shared_rule.mailbox or account.default_mailbox,
+                    auto=shared_rule.auto,
                     criteria=shared_rule.criteria,
                     actions=shared_rule.actions,
                 )
@@ -411,6 +415,7 @@ def _build_group_member_rules(
             Rule(
                 name=f"{_require_string(rule_mapping, 'name', rule_context)} ({group_name})",
                 mailbox=_string_or_default(rule_mapping.get("mailbox"), default_mailbox, f"{rule_context}.mailbox"),
+                auto=_optional_bool(rule_mapping.get("auto"), f"{rule_context}.auto", default=True) is not False,
                 criteria=_build_criteria(merged_criteria),
                 actions=_build_actions(_ensure_mapping(rule_mapping.get("actions", {}), f"{rule_context}.actions"), rule_context),
             )

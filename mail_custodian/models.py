@@ -103,6 +103,7 @@ class Rule:
     mailbox: str
     criteria: Criteria
     actions: Actions
+    auto: bool = True
 
 
 @dataclass(frozen=True)
