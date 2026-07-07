@@ -3,8 +3,7 @@
 `mail-custodian` is a cron-friendly IMAP filtering application. It reads
 one or more YAML files, connects directly to IMAP mailboxes, evaluates
 rules against live messages, and applies actions like copy, move, flag,
-mark read/unread, or delete. It does not store mail locally and does not
-provide an interactive UI.
+mark read/unread, or delete. It does not provide an interactive UI.
 
 ## Vibed Code Warning
 
