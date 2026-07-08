@@ -283,7 +283,13 @@ def _build_message(
 
 def test_search_terms_include_flag_and_age_filters() -> None:
     session = _build_session()
-    criteria = Criteria(seen=False, flagged=True, older_than_days=5, younger_than_days=2)
+    criteria = Criteria(
+        seen=False,
+        flagged=True,
+        older_than_days=5,
+        younger_than_days=2,
+        list_id_contains=("newsletters.example.com",),
+    )
     terms = session._build_search_terms(criteria)
 
     assert terms[0] == "UNDELETED"
@@ -291,6 +297,19 @@ def test_search_terms_include_flag_and_age_filters() -> None:
     assert "FLAGGED" in terms
     assert "BEFORE" in terms
     assert "SINCE" in terms
+    assert terms[-3:] == ["HEADER", "List-ID", "newsletters.example.com"]
+
+
+def test_search_terms_skip_server_side_narrowing_for_match_any() -> None:
+    session = _build_session()
+    criteria = Criteria(
+        match="any",
+        seen=False,
+        older_than_days=5,
+        list_id_contains=("newsletters.example.com",),
+    )
+
+    assert session._build_search_terms(criteria) == ["UNDELETED"]
 
 
 def test_list_uids_filters_by_uid_checkpoint() -> None:

@@ -14,6 +14,7 @@ class Criteria:
     sender: tuple[str, ...] = ()
     to: tuple[str, ...] = ()
     cc: tuple[str, ...] = ()
+    list_id_contains: tuple[str, ...] = ()
     subject_contains: tuple[str, ...] = ()
     body_contains: tuple[str, ...] = ()
     header_contains: dict[str, tuple[str, ...]] = field(default_factory=dict)
@@ -35,14 +36,15 @@ class Criteria:
             checks.append(_contains_any(message.to, self.to))
         if self.cc:
             checks.append(_contains_any(message.cc, self.cc))
+        if self.list_id_contains:
+            checks.append(_header_contains_any(message.email_message, "List-ID", self.list_id_contains))
         if self.subject_contains:
             checks.append(_contains_any(message.subject, self.subject_contains))
         if self.body_contains:
             checks.append(_contains_any(message.body_text, self.body_contains))
 
         for header_name, values in self.header_contains.items():
-            header_value = "\n".join(message.email_message.get_all(header_name, []))
-            checks.append(_contains_any(header_value, values))
+            checks.append(_header_contains_any(message.email_message, header_name, values))
 
         if self.seen is not None:
             checks.append(message.has_flag("\\Seen") is self.seen)
@@ -165,6 +167,10 @@ class ActionResult:
 def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
     haystack = text.casefold()
     return any(needle.casefold() in haystack for needle in needles)
+
+
+def _header_contains_any(message: EmailMessage, header_name: str, needles: tuple[str, ...]) -> bool:
+    return _contains_any("\n".join(message.get_all(header_name, [])), needles)
 
 
 def _cutoff(days: int) -> datetime:

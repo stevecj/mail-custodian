@@ -170,6 +170,32 @@ def test_load_config_parses_rule_auto_flag(tmp_path: Path) -> None:
     assert config.accounts[0].rules[1].auto is False
 
 
+def test_load_config_parses_list_id_criterion(tmp_path: Path) -> None:
+    (tmp_path / "config.yaml").write_text(
+        textwrap.dedent(
+            """
+            accounts:
+              - name: personal
+                host: imap.personal.test
+                username: personal-user
+                password: personal-secret
+                rules:
+                  - name: list rule
+                    criteria:
+                      list_id_contains:
+                        - newsletters.example.com
+                    actions:
+                      mark_read: true
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    config = load_config([str(tmp_path / "config.yaml")])
+
+    assert config.accounts[0].rules[0].criteria.list_id_contains == ("newsletters.example.com",)
+
+
 def test_load_config_expands_account_groups_with_merged_criteria(tmp_path: Path) -> None:
     (tmp_path / "config.yaml").write_text(
         textwrap.dedent(

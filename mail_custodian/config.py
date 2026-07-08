@@ -442,6 +442,7 @@ def _build_criteria(data: dict[str, Any]) -> Criteria:
         sender=_string_list(data.get("from"), "criteria.from"),
         to=_string_list(data.get("to"), "criteria.to"),
         cc=_string_list(data.get("cc"), "criteria.cc"),
+        list_id_contains=_string_list(data.get("list_id_contains"), "criteria.list_id_contains"),
         subject_contains=_string_list(data.get("subject_contains"), "criteria.subject_contains"),
         body_contains=_string_list(data.get("body_contains"), "criteria.body_contains"),
         header_contains=header_contains,
@@ -619,8 +620,12 @@ def _optional_int(value: Any, context: str, default: int | None = None) -> int |
 def _is_likely_slow_rule(criteria: Criteria) -> bool:
     if criteria.new_messages_only:
         return False
+    if criteria.match != "all":
+        return True
     if criteria.seen is not None or criteria.flagged is not None or criteria.answered is not None:
         return False
     if criteria.older_than_days is not None or criteria.younger_than_days is not None:
+        return False
+    if len(criteria.list_id_contains) == 1:
         return False
     return True

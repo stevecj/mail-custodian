@@ -96,6 +96,7 @@ All configured criteria are combined with `AND` by default. Set
 | Key                                     | Meaning                                                                                        |
 |:----------------------------------------|:-----------------------------------------------------------------------------------------------|
 | `from`, `to`, `cc`                      | Case-insensitive substring match against the address headers.                                  |
+| `list_id_contains`                      | Case-insensitive substring match against the `List-ID` header.                                 |
 | `subject_contains`                      | Case-insensitive substring match against the subject.                                          |
 | `body_contains`                         | Case-insensitive substring match against decoded body text.                                    |
 | `header_contains`                       | Mapping of header name to string or list of strings to search.                                 |

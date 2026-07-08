@@ -13,6 +13,7 @@ def test_criteria_match_expected_message() -> None:
     message["From"] = "Billing Team <billing@example.com>"
     message["To"] = "user@example.com"
     message["Cc"] = "ops@example.com"
+    message["List-ID"] = "Invoices <invoices.example.com>"
     message["Subject"] = "Invoice for June"
     message["Date"] = format_datetime(datetime.now(timezone.utc) - timedelta(days=10))
     message["X-Priority"] = "High"
@@ -38,6 +39,7 @@ def test_criteria_match_expected_message() -> None:
         sender=("billing@example.com",),
         to=("user@example.com",),
         cc=("ops@",),
+        list_id_contains=("invoices.example.com",),
         subject_contains=("invoice",),
         body_contains=("attached invoice",),
         header_contains={"X-Priority": ("high",)},

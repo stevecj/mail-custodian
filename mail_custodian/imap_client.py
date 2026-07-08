@@ -246,6 +246,8 @@ class IMAPSession:
 
     def _build_search_terms(self, criteria: Criteria) -> list[str]:
         terms = ["UNDELETED"]
+        if criteria.match != "all":
+            return terms
 
         if criteria.seen is True:
             terms.append("SEEN")
@@ -269,6 +271,8 @@ class IMAPSession:
         if criteria.younger_than_days is not None:
             cutoff = (now - timedelta(days=criteria.younger_than_days)).strftime("%d-%b-%Y")
             terms.extend(["SINCE", cutoff])
+        if len(criteria.list_id_contains) == 1:
+            terms.extend(["HEADER", "List-ID", criteria.list_id_contains[0]])
 
         return terms
 

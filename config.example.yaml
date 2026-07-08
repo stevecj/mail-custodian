@@ -34,6 +34,8 @@ accounts:
       - name: Move newsletters to archive
         mailbox: "@root"
         criteria:
+          list_id_contains:
+            - newsletters.example.com
           from:
             - newsletter@example.com
           subject_contains:
