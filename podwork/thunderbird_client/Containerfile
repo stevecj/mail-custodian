@@ -1,0 +1,30 @@
+FROM docker.io/almalinux/10-base
+
+ARG CONTAINER_USER=mailcustodian
+ARG CONTAINER_UID=1000
+ARG CONTAINER_GID=1000
+
+RUN dnf -y install \
+        dbus-daemon \
+        dbus-x11 \
+        gnome-keyring \
+        gnome-remote-desktop \
+        mesa-dri-drivers \
+        mutter \
+        openssl \
+        pipewire \
+        thunderbird \
+        wireplumber \
+        xdg-user-dirs \
+    && dnf clean all \
+    && groupadd --gid "${CONTAINER_GID}" "${CONTAINER_USER}" \
+    && useradd --create-home --uid "${CONTAINER_UID}" --gid "${CONTAINER_GID}" --shell /bin/bash "${CONTAINER_USER}"
+
+COPY container-entrypoint.sh /usr/local/bin/container-entrypoint
+COPY start-desktop.sh /usr/local/bin/start-desktop
+
+RUN chmod 0755 /usr/local/bin/container-entrypoint /usr/local/bin/start-desktop
+
+EXPOSE 3389
+
+ENTRYPOINT ["/usr/local/bin/container-entrypoint"]
