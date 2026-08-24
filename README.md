@@ -5,6 +5,13 @@ Podman container in Linux, running on a VPS host, and access it from your
 local system (Windows, macOS, Linux, etc.) through an SSH tunnel and an
 RDP client.
 
+## Caveat
+
+This document was reverse-engineered from a working setup, and the actual
+setup process was not documented along the way. This information is
+hopefully correct, but please enter an Issue on GitHub if you encounter a
+problem, and I will attempt to address it.
+
 ## Architecture
 
 - Thunderbird runs in a containerized GNOME Wayland session on the VPS.
@@ -85,7 +92,8 @@ ssh <vps-user>@<vps-host> "mkdir -p ~/podwork/data/thunderbird_client"
 
 ## 5) Personalize runtime settings
 
-Set variables on the VPS before launch (or in shell profile/systemd env file):
+Set variables on the VPS before launch (or in shell profile/systemd env
+file):
 
 ```bash
 export THUNDERBIRD_CONTAINER_USER=<container-unix-user>
@@ -98,7 +106,8 @@ Notes:
 
 - `THUNDERBIRD_CONTAINER_USER` defaults to the current VPS username.
 - `THUNDERBIRD_RDP_USER` defaults to `THUNDERBIRD_CONTAINER_USER`.
-- Keep `THUNDERBIRD_RDP_BIND_ADDR=127.0.0.1` unless you intentionally want public RDP.
+- Keep `THUNDERBIRD_RDP_BIND_ADDR=127.0.0.1` unless you intentionally want
+  public RDP.
 
 For non-interactive startup, also set:
 
@@ -115,16 +124,17 @@ cd ~/podwork
 ./run-thunderbird-client.sh
 ```
 
-The launcher builds `localhost/thunderbird_client:latest`, recreates container
-`thunderbird_client`, mounts persistent data at `~/.thunderbird`, and configures
-RDP credentials from a Podman secret.
+The launcher builds `localhost/thunderbird_client:latest`, recreates
+container `thunderbird_client`, mounts persistent data at `~/.thunderbird`,
+and configures RDP credentials from a Podman secret.
 
 ## 7) Run the container as a startup service (systemd user service)
 
 This setup is intended to run as a **user-level systemd service** that
 automatically starts when the VPS host boots.
 
-Enable user lingering (required for auto-start at boot without interactive login):
+Enable user lingering (required for auto-start at boot without interactive
+login):
 
 ```bash
 sudo loginctl enable-linger <vps-user>
@@ -157,8 +167,8 @@ systemctl --user daemon-reload
 systemctl --user enable --now thunderbird-client.service
 ```
 
-If you rerun `./run-thunderbird-client.sh` later (which recreates the container),
-restart the service:
+If you rerun `./run-thunderbird-client.sh` later (which recreates the
+container), restart the service:
 
 ```bash
 systemctl --user restart thunderbird-client.service
@@ -198,7 +208,8 @@ This repo includes generic launch scripts in `sample_scripts/`:
 - `sample_scripts/connect-vps-rdp-linux.sh` (Linux bash + Remmina)
 - `sample_scripts/connect-vps-rdp-macos.sh` (macOS bash + Remmina)
 
-Edit `VpsUser`/`VpsHost` (PowerShell) or `VPS_USER`/`VPS_HOST` (bash), then run.
+Edit `VpsUser`/`VpsHost` (PowerShell) or `VPS_USER`/`VPS_HOST` (bash),
+then run.
 
 ### Save a Windows Remote Desktop session once
 
