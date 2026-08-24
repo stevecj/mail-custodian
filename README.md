@@ -1,15 +1,18 @@
 # Thunderbird on a VPS (rootless Podman + SSH-tunneled RDP)
 
-This project runs Thunderbird in a rootless Podman container on a Linux VPS and
-accesses it from any local OS (Windows, macOS, or Linux) through an SSH tunnel
-and RDP client.
+This project helps you to set up the Thunderbird email client in a rootless
+Podman container in Linux, running on a VPS host accesses it from your
+local system (Windows, macOS, Linux, etc.) through an SSH tunnel and an
+RDP client.
 
 ## Architecture
 
 - Thunderbird runs in a containerized GNOME Wayland session on the VPS.
 - GNOME Remote Desktop serves that session on container port `3389`.
-- The host publishes RDP on loopback (`127.0.0.1`), not on public interfaces.
-- Local clients connect by tunneling `localhost:3389` to VPS `127.0.0.1:3389`.
+- The host publishes RDP on loopback (`127.0.0.1`), not on public
+  interfaces.
+- Local clients connect by tunneling `localhost:3389` to VPS
+  `127.0.0.1:3389`.
 
 ## Repository layout
 
@@ -18,7 +21,7 @@ and RDP client.
 - `podwork/thunderbird_client/container-entrypoint.sh`: container bootstrap
 - `podwork/thunderbird_client/start-desktop.sh`: GNOME/RDP/Thunderbird startup
 - `podwork/data/thunderbird_client`: persistent Thunderbird profile/mail data on VPS
-  (`data/` is intentionally not tracked in git)
+  (`contents of data/thunderbird_client/` are intentionally not tracked in git)
 
 ## 1) Install required packages on VPS
 
@@ -116,16 +119,62 @@ The launcher builds `localhost/thunderbird_client:latest`, recreates container
 `thunderbird_client`, mounts persistent data at `~/.thunderbird`, and configures
 RDP credentials from a Podman secret.
 
-## 7) Verify service state on VPS
+## 7) Run the container as a startup service (systemd user service)
+
+This setup is intended to run as a **user-level systemd service** that
+automatically starts when the VPS host boots.
+
+Enable user lingering (required for auto-start at boot without interactive login):
 
 ```bash
+sudo loginctl enable-linger <vps-user>
+```
+
+Create `~/.config/systemd/user/thunderbird-client.service` on the VPS:
+
+```ini
+[Unit]
+Description=Thunderbird RDP container
+
+[Service]
+Type=simple
+KillMode=none
+Restart=always
+RestartSec=5
+TimeoutStartSec=0
+TimeoutStopSec=45
+ExecStart=/usr/bin/podman start --attach thunderbird_client
+ExecStop=/usr/bin/podman stop --time 30 thunderbird_client
+
+[Install]
+WantedBy=default.target
+```
+
+Enable and start it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now thunderbird-client.service
+```
+
+If you rerun `./run-thunderbird-client.sh` later (which recreates the container),
+restart the service:
+
+```bash
+systemctl --user restart thunderbird-client.service
+```
+
+## 8) Verify service and container state on VPS
+
+```bash
+systemctl --user status thunderbird-client.service --no-pager
 podman ps --format '{{.Names}}|{{.Status}}|{{.Ports}}'
 ss -ltn | grep ':3389'
 ```
 
 Expected: RDP published on `127.0.0.1:<port>`.
 
-## 8) Connect from local machine (Windows/macOS/Linux)
+## 9) Connect from local machine (Windows/macOS/Linux)
 
 Create SSH tunnel from local machine:
 
@@ -141,16 +190,16 @@ Then open any RDP client to:
 
 Log in using `THUNDERBIRD_RDP_USER` and the configured password.
 
-## 9) Optional Windows helper files
+## 10) Optional Windows helper files
 
 - `mail-custodian-connect.ps1` launches SSH tunnel + `mstsc`
 - `mail-custodian-via-ssh-tunnel.rdp` targets `127.0.0.1`
 
 Edit host/user/port values in those files to match your VPS.
 
-## 10) Thunderbird close-button protection
+## 11) Thunderbird close-button protection
 
-To reduce accidental closes while keeping menu Quit available:
+To prevent accidentally closing Thunderbird within the RDP session:
 
 1. In Thunderbird: **Settings -> General -> Config Editor**
 2. Set `toolkit.legacyUserProfileCustomizations.stylesheets = true`
@@ -163,4 +212,8 @@ To reduce accidental closes while keeping menu Quit available:
 }
 ```
 
-Restart Thunderbird.
+Restart Thunderbird by restarting the container:
+
+```bash
+systemctl --user restart thunderbird-client.service
+```
