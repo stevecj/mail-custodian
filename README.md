@@ -1,7 +1,7 @@
 # Thunderbird on a VPS (rootless Podman + SSH-tunneled RDP)
 
 This project helps you to set up the Thunderbird email client in a rootless
-Podman container in Linux, running on a VPS host accesses it from your
+Podman container in Linux, running on a VPS host, and access it from your
 local system (Windows, macOS, Linux, etc.) through an SSH tunnel and an
 RDP client.
 
