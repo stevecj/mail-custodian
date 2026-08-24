@@ -12,6 +12,14 @@ setup process was not documented along the way. This information is
 hopefully correct, but please enter an Issue on GitHub if you encounter a
 problem, and I will attempt to address it.
 
+## Quick start
+
+1. Install Podman and SSH on the VPS.
+2. Enable rootless Podman and confirm `/dev/fuse` is present.
+3. Copy `podwork/` to the VPS user account.
+4. Run `./run-thunderbird-client.sh` from `~/podwork`.
+5. Open an SSH tunnel locally and connect to `127.0.0.1:3389`.
+
 ## Architecture
 
 - Thunderbird runs in a containerized GNOME Wayland session on the VPS.
