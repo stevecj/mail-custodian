@@ -15,6 +15,18 @@ Start/rebuild with:
 ./run-thunderbird-client.sh
 ```
 
+For scheduled mailbox backups using a separate profile and container run, use:
+
+```sh
+./run-thunderbird-backup.sh
+```
+
+Install the twice-daily systemd timer with:
+
+```sh
+./install-thunderbird-backup-timer.sh
+```
+
 The launcher script:
 
 - prompts for the RDP password unless `THUNDERBIRD_RDP_PASSWORD` is set
@@ -42,6 +54,13 @@ THUNDERBIRD_RDP_USER=mailops \
 THUNDERBIRD_RDP_PORT=3390 \
 ./run-thunderbird-client.sh
 ```
+
+Backup-specific optional variables:
+
+- `THUNDERBIRD_BACKUP_CONTAINER_USER` (default: current VPS username)
+- `THUNDERBIRD_BACKUP_SYNC_SECONDS` (default: `300`)
+- `THUNDERBIRD_BACKUP_RETENTION` (default: `60`)
+- `THUNDERBIRD_BACKUP_SKIP_SYNC` (default: `0`)
 
 ## Host requirements
 

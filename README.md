@@ -5,6 +5,9 @@ Podman container in Linux, running on a VPS host, and access it from your
 local system (Windows, macOS, Linux, etc.) through an SSH tunnel and an
 RDP client.
 
+For scheduled mailbox backups with a separate Thunderbird profile and
+twice-daily snapshots, see [THUNDERBIRD_BACKUP.md](THUNDERBIRD_BACKUP.md).
+
 ## Caveat
 
 This document was reverse-engineered from a working setup, and the actual
@@ -37,6 +40,8 @@ problem, and I will attempt to address it.
 - `podwork/thunderbird_client/start-desktop.sh`: GNOME/RDP/Thunderbird startup
 - `podwork/data/thunderbird_client`: persistent Thunderbird profile/mail data on VPS
   (`contents of data/thunderbird_client/` are intentionally not tracked in git)
+- `THUNDERBIRD_BACKUP.md`: separate backup workflow (headless sync +
+  deduplicated twice-daily snapshots)
 
 ## 1) Install required packages on VPS
 

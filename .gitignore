@@ -5,3 +5,7 @@
 *.swp
 *~
 *.bak
+
+/podwork/data/thunderbird_client/
+/podwork/data/thunderbird_backup_profile/
+/podwork/data/thunderbird_backup_snapshots/
