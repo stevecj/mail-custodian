@@ -190,14 +190,33 @@ Then open any RDP client to:
 
 Log in using `THUNDERBIRD_RDP_USER` and the configured password.
 
-## 10) Optional Windows helper files
+## 10) Sample connection scripts
+
+This repo includes generic launch scripts in `sample_scripts/`:
+
+- `sample_scripts/connect-vps-rdp.ps1` (Windows PowerShell + MSTSC)
+- `sample_scripts/connect-vps-rdp-linux.sh` (Linux bash + Remmina)
+- `sample_scripts/connect-vps-rdp-macos.sh` (macOS bash + Remmina)
+
+Edit `VpsUser`/`VpsHost` (PowerShell) or `VPS_USER`/`VPS_HOST` (bash), then run.
+
+### Save a Windows Remote Desktop session once
+
+To avoid repeatedly typing host and username:
+
+1. Open `mstsc`.
+2. Set Computer to `127.0.0.1:3389` and enter your RDP username.
+3. Use **Show Options -> Save As...** and save an `.rdp` file.
+4. Pass that file path with `-RdpFile` to `connect-vps-rdp.ps1`.
+
+## 11) Optional Windows helper files
 
 - `mail-custodian-connect.ps1` launches SSH tunnel + `mstsc`
 - `mail-custodian-via-ssh-tunnel.rdp` targets `127.0.0.1`
 
 Edit host/user/port values in those files to match your VPS.
 
-## 11) Thunderbird close-button protection
+## 12) Thunderbird close-button protection
 
 To prevent accidentally closing Thunderbird within the RDP session:
 
