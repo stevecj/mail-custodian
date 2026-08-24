@@ -1,6 +1,7 @@
 /*.rdp
 /*.ps1
 
+.github
 *.swp
 *~
 *.bak
