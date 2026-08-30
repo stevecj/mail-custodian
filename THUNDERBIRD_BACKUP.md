@@ -81,6 +81,9 @@ cd ~/podwork
 
 The sync script copies `data/thunderbird_client/` to
 `data/thunderbird_backup_profile/`, excluding transient Thunderbird lock files.
+It also excludes and removes Thunderbird filter-rule files
+(`msgFilterRules.dat` and legacy `rules.dat`) from the backup profile, so
+filters cannot run during headless backup syncs.
 If the interactive Thunderbird service/container is running, the script stops it
 before copying and starts it again afterward. It also uses the same lock as
 scheduled backups. If a backup is already running, the sync fails; if a

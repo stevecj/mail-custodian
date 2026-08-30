@@ -89,6 +89,8 @@ mkdir -p "${backup_profile_dir}"
 rsync -a --delete --delete-excluded \
     --exclude='.parentlock' \
     --exclude='lock' \
+    --exclude='msgFilterRules.dat' \
+    --exclude='rules.dat' \
     "${source_profile_dir}/" \
     "${backup_profile_dir}/"
 
