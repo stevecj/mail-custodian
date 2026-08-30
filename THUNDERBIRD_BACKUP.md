@@ -48,7 +48,7 @@ mailbox-aware export pipeline could eliminate.
 On the VPS, from `~/podwork`:
 
 ```bash
-chmod +x run-thunderbird-backup.sh install-thunderbird-backup-timer.sh
+chmod +x run-thunderbird-backup.sh sync-thunderbird-backup-profile.sh install-thunderbird-backup-timer.sh
 ./install-thunderbird-backup-timer.sh
 ```
 
@@ -68,6 +68,25 @@ You can trigger an immediate run with:
 systemctl --user start thunderbird-backup.service
 ```
 
+## Sync account configuration from the interactive profile
+
+The backup profile is separate from the interactive RDP profile, so account
+configuration is not updated automatically. To refresh the backup profile from
+the interactive Thunderbird profile:
+
+```bash
+cd ~/podwork
+./sync-thunderbird-backup-profile.sh
+```
+
+The sync script copies `data/thunderbird_client/` to
+`data/thunderbird_backup_profile/`, excluding transient Thunderbird lock files.
+If the interactive Thunderbird service/container is running, the script stops it
+before copying and starts it again afterward. It also uses the same lock as
+scheduled backups. If a backup is already running, the sync fails; if a
+scheduled backup starts while the sync is running, that backup exits without
+touching the profile.
+
 ## Useful environment variables
 
 Set these before running the backup script/service if needed:
@@ -82,6 +101,7 @@ Set these before running the backup script/service if needed:
 ## Backup automation files
 
 - `podwork/run-thunderbird-backup.sh`
+- `podwork/sync-thunderbird-backup-profile.sh`
 - `podwork/install-thunderbird-backup-timer.sh`
 
 ## Browse and retrieve backed-up messages

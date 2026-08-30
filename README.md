@@ -222,7 +222,9 @@ This repo includes generic launch scripts in `sample_scripts/`:
 - `sample_scripts/connect-vps-rdp-macos.sh` (macOS bash + Remmina)
 
 Edit `VpsUser`/`VpsHost` (PowerShell) or `VPS_USER`/`VPS_HOST` (bash),
-then run.
+then run. With no action options, each script starts both the SSH tunnel and
+the RDP client. To run only one action, use `-Tunnel` or `-Rdp` with the
+PowerShell script, or `--tunnel`/`--rdp` (`-t`/`-r`) with the bash scripts.
 
 ### Save a Windows Remote Desktop session once
 

@@ -40,8 +40,8 @@ fi
 mkdir -p "${profile_dir}" "${snapshots_dir}" "${data_root}"
 exec 9>"${lock_file}"
 if ! flock -n 9; then
-    echo "Another backup run is already in progress." >&2
-    exit 1
+    echo "Another backup or profile sync run is already in progress; skipping this backup run." >&2
+    exit 0
 fi
 
 if ! podman image exists "${image}"; then

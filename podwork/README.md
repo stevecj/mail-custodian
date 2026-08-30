@@ -21,6 +21,15 @@ For scheduled mailbox backups using a separate profile and container run, use:
 ./run-thunderbird-backup.sh
 ```
 
+To refresh the backup profile from the interactive Thunderbird profile, run:
+
+```sh
+./sync-thunderbird-backup-profile.sh
+```
+
+If the interactive Thunderbird service/container is running, the sync script
+stops it before copying and starts it again afterward.
+
 Install the twice-daily systemd timer with:
 
 ```sh
@@ -61,6 +70,10 @@ Backup-specific optional variables:
 - `THUNDERBIRD_BACKUP_SYNC_SECONDS` (default: `300`)
 - `THUNDERBIRD_BACKUP_RETENTION` (default: `60`)
 - `THUNDERBIRD_BACKUP_SKIP_SYNC` (default: `0`)
+
+`sync-thunderbird-backup-profile.sh` and `run-thunderbird-backup.sh` share the
+same lock. Profile sync fails if a backup is in progress; scheduled backups
+skip themselves if profile sync is in progress.
 
 ## Host requirements
 
